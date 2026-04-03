@@ -1,0 +1,9 @@
+transformer: accuracy=1.0000
+velm: accuracy=0.4620
+velm_params: 38256
+velm_acc: 0.462
+velm_time: 120.02626466751099
+transformer_params: 40456
+transformer_acc: 1.0
+transformer_time: 72.05159592628479
+best_cfg: {'latent_dim': 48, 'memory_dim': 128, 'cib_lambda': 0.001, 'lr': 0.001}

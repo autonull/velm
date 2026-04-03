@@ -1,0 +1,4 @@
+transformer: accuracy=1.0000
+velm: accuracy=0.4780
+Transformer time: 36.7s
+VELM time: 4.6s
