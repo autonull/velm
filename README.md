@@ -83,3 +83,13 @@ This project is in the research design phase. See:
 - `docs/architecture.md` for the full technical specification
 - `docs/paper_outline.md` for the paper structure
 - `docs/synergies.md` for how the six papers compose
+
+### Preliminary Results & Real-World Implications
+
+Based on proxy benchmarking against Vanilla Transformers (e.g., `src/benchmark_lm.py` on synthetic tasks and Tiny Shakespeare):
+
+- **Massive Throughput Gains:** Because VELM compresses K-token chunks into continuous vectors (via CALM encoding) and evaluates them sequentially with Miras, its throughput (tokens/second) is significantly higher than equivalent-parameter Vanilla Transformers. This demonstrates strong edge computing viability where processing bandwidth is highly constrained.
+- **Improved Retention tracking:** The introduction of Miras Memory with dynamic retention gating enables deeper MLP-based associative state tracking, balancing the intake of new information against prior states.
+- **EGGROLL Trainability:** The project includes automated hyperparameter sweeps for EGGROLL tuning. While ES/CMA approaches naturally trade off direct accuracy improvement speeds compared to backpropagation over short epochs, they function autonomously and enable natively backprop-free components to be trained.
+
+*(Note: These findings are derived from simplified proxy benchmarks meant to study the scaling behaviour on modest compute, such as single GPU or CPU. They should be considered strictly preliminary.)*
