@@ -2,6 +2,17 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class SwiGLU(nn.Module):
+    def __init__(self, in_features, hidden_features, out_features=None):
+        super().__init__()
+        out_features = out_features or in_features
+        self.w1 = nn.Linear(in_features, hidden_features)
+        self.w2 = nn.Linear(in_features, hidden_features)
+        self.w3 = nn.Linear(hidden_features, out_features)
+
+    def forward(self, x):
+        return self.w3(F.silu(self.w1(x)) * self.w2(x))
+
 class CALMEncoder(nn.Module):
     """Compress K tokens into one continuous vector (simple proxy).
     Implementation: embed tokens, flatten to preserve order, then MLP projection.
@@ -10,11 +21,8 @@ class CALMEncoder(nn.Module):
         super().__init__()
         self.block_size = block_size
         self.embed = nn.Embedding(vocab_size, embed_dim)
-        self.proj = nn.Sequential(
-            nn.Linear(embed_dim * block_size, latent_dim * 2),
-            nn.GELU(),
-            nn.Linear(latent_dim * 2, latent_dim)
-        )
+        # Use SwiGLU for enhanced representation efficiency
+        self.proj = SwiGLU(embed_dim * block_size, latent_dim * 2, latent_dim)
 
     def forward(self, tokens):
         # tokens: (B, K)
@@ -27,11 +35,9 @@ class CALMEncoder(nn.Module):
 class ResidualBlock(nn.Module):
     def __init__(self, dim, hidden):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(dim, hidden),
-            nn.GELU(),
-            nn.Linear(hidden, dim)
-        )
+        # Use SwiGLU for enhanced representation efficiency
+        self.net = SwiGLU(dim, hidden, dim)
+
     def forward(self, x):
         return x + self.net(x)
 

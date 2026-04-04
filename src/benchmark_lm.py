@@ -212,7 +212,9 @@ def main():
     velm_params = count_params(velm)
 
     # Instantiate Transformer with strictly matched parameter count
-    transformer = TransformerLM(vocab_size=vocab_size, d_model=128, nhead=4, nlayers=3, dim_feedforward=256, max_len=args.seq_len)
+    # Increased nlayers from 3 to 5 to ensure Transformer is strictly larger than VELM for fair comparison
+    # (VELM SwiGLU added params, so we need 5 layers of TF to beat 709k)
+    transformer = TransformerLM(vocab_size=vocab_size, d_model=128, nhead=4, nlayers=5, dim_feedforward=256, max_len=args.seq_len)
     tf_params = count_params(transformer)
 
     print(f"VELM params: {velm_params}")
