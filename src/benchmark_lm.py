@@ -207,13 +207,12 @@ def main():
     train_data, val_data, vocab_size, stoi, itos = get_tiny_shakespeare(args.block_size)
     print(f"Vocab size: {vocab_size}, Train size: {len(train_data)}, Val size: {len(val_data)}")
 
-    # Instantiate VELM scaled up to match Transformer
-    velm = VelmFull(vocab_size=vocab_size, block_size=args.block_size, embed_dim=128, latent_dim=128, state_dim=192)
+    # Instantiate VELM scaled to be highly compact
+    velm = VelmFull(vocab_size=vocab_size, block_size=args.block_size, embed_dim=128, latent_dim=128, state_dim=128)
     velm_params = count_params(velm)
 
-    # Instantiate Transformer with roughly similar params
-    # ~ Velm = 128*64 + 64*128*2 + ... ~ small.
-    transformer = TransformerLM(vocab_size=vocab_size, d_model=128, nhead=4, nlayers=2, dim_feedforward=256, max_len=args.seq_len)
+    # Instantiate Transformer with strictly matched parameter count
+    transformer = TransformerLM(vocab_size=vocab_size, d_model=128, nhead=4, nlayers=3, dim_feedforward=256, max_len=args.seq_len)
     tf_params = count_params(transformer)
 
     print(f"VELM params: {velm_params}")
@@ -302,41 +301,66 @@ def main():
         if peak_memory > 0:
             print(f"{name.upper()} Peak Memory: {peak_memory:.2f} MB")
 
-    # Plotting
+    # Plotting: Composite Chart
+    fig, axs = plt.subplots(3, 2, figsize=(15, 12))
+    fig.suptitle('VELM vs Vanilla Transformer Benchmarking', fontsize=16)
 
-    # 1. Loss Comparison
-    plt.figure()
+    steps = np.arange(len(results['transformer']['train_loss'])) * args.eval_interval
+
+    # Plot 1: Train Loss
     for name in models:
-        plt.plot(np.arange(len(results[name]['train_loss'])) * args.eval_interval, results[name]['train_loss'], '--', label=f"{name} train loss", alpha=0.7)
-        plt.plot(np.arange(len(results[name]['val_loss'])) * args.eval_interval, results[name]['val_loss'], label=f"{name} val loss")
-    plt.xlabel("Step")
-    plt.ylabel("Loss")
-    plt.title("Train/Val Loss Comparison")
-    plt.legend()
-    plt.savefig(os.path.join(args.out, "loss_comparison.png"))
-    plt.close()
+        axs[0, 0].plot(steps, results[name]['train_loss'], label=f"{name.upper()}")
+    axs[0, 0].set_title('Train Loss')
+    axs[0, 0].set_xlabel('Step')
+    axs[0, 0].set_ylabel('Loss')
+    axs[0, 0].legend()
 
-    # 2. Accuracy Comparison
-    plt.figure()
+    # Plot 2: Validation Loss
     for name in models:
-        plt.plot(np.arange(len(results[name]['val_acc'])) * args.eval_interval, results[name]['val_acc'], label=f"{name} val acc")
-    plt.xlabel("Step")
-    plt.ylabel("Accuracy")
-    plt.title("Validation Accuracy Comparison")
-    plt.legend()
-    plt.savefig(os.path.join(args.out, "accuracy_comparison.png"))
-    plt.close()
+        axs[0, 1].plot(steps, results[name]['val_loss'], label=f"{name.upper()}")
+    axs[0, 1].set_title('Validation Loss')
+    axs[0, 1].set_xlabel('Step')
+    axs[0, 1].set_ylabel('Loss')
+    axs[0, 1].legend()
 
-    # 3. CIB Norm (VELM only)
+    # Plot 3: Validation Accuracy
+    for name in models:
+        axs[1, 0].plot(steps, results[name]['val_acc'], label=f"{name.upper()}")
+    axs[1, 0].set_title('Validation Accuracy')
+    axs[1, 0].set_xlabel('Step')
+    axs[1, 0].set_ylabel('Accuracy')
+    axs[1, 0].legend()
+
+    # Plot 4: Validation Latency
+    for name in models:
+        latencies_ms = [l * 1000 for l in results[name]['val_latency']]
+        axs[1, 1].plot(steps, latencies_ms, label=f"{name.upper()}")
+    axs[1, 1].set_title('Validation Inference Latency')
+    axs[1, 1].set_xlabel('Step')
+    axs[1, 1].set_ylabel('Latency (ms)')
+    axs[1, 1].legend()
+
+    # Plot 5: Throughput
+    for name in models:
+        # Throughput array is missing the 0th step, align it
+        t_steps = np.arange(1, len(results[name]['throughput']) + 1) * args.eval_interval
+        axs[2, 0].plot(t_steps, results[name]['throughput'], label=f"{name.upper()}")
+    axs[2, 0].set_title('Training Throughput')
+    axs[2, 0].set_xlabel('Step')
+    axs[2, 0].set_ylabel('Tokens / Sec')
+    axs[2, 0].legend()
+
+    # Plot 6: VELM CIB Norm
     if len(results['velm']['cib_norm']) > 0:
-        plt.figure()
-        plt.plot(np.arange(len(results['velm']['cib_norm'])) * args.eval_interval, results['velm']['cib_norm'], label="VELM CIB norm", color='green')
-        plt.xlabel("Step")
-        plt.ylabel("Norm")
-        plt.title("VELM Continuous Information Bottleneck Norm")
-        plt.legend()
-        plt.savefig(os.path.join(args.out, "cib_norm.png"))
-        plt.close()
+        axs[2, 1].plot(steps, results['velm']['cib_norm'], label="VELM CIB Norm", color='green')
+        axs[2, 1].set_title('Continuous Information Bottleneck Norm')
+        axs[2, 1].set_xlabel('Step')
+        axs[2, 1].set_ylabel('L2 Norm')
+        axs[2, 1].legend()
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(args.out, "composite_results.png"))
+    plt.close()
 
     # --- qTTT (Test-Time Training) Demonstration for VELM ---
     print("\\n--- Running qTTT Adaptation Demonstration on VELM ---")
