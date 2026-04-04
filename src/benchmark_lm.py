@@ -209,6 +209,7 @@ def main():
         optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
         t0 = time.time()
+        t_start_step = time.time()
         for iter_num in range(args.max_iters):
             if iter_num % args.eval_interval == 0 or iter_num == args.max_iters - 1:
                 train_loss, train_acc, cib_norm = estimate_loss(model, train_data, name, args.eval_iters, args.batch_size, args.seq_len, args.block_size, device)
@@ -220,8 +221,13 @@ def main():
                 if cib_norm is not None:
                     results[name]['cib_norm'].append(val_cib_norm)
 
+                t_end_step = time.time()
+                steps_per_sec = args.eval_interval / (t_end_step - t_start_step) if iter_num > 0 else 0
+                t_start_step = time.time()
+
                 print(f"Step {iter_num}: Train Loss {train_loss:.4f}, Val Loss {val_loss:.4f}, Val Acc {val_acc:.4f}" +
-                      (f", CIB Norm {val_cib_norm:.4f}" if cib_norm is not None else ""))
+                      (f", CIB Norm {val_cib_norm:.4f}" if cib_norm is not None else "") +
+                      (f", Speed {steps_per_sec:.2f} steps/s" if iter_num > 0 else ""))
 
             X, Y = get_batch(train_data, args.batch_size, args.seq_len, args.block_size)
             X, Y = X.to(device), Y.to(device)
@@ -251,15 +257,40 @@ def main():
         print(f"{name.upper()} Training Time: {t1-t0:.2f}s")
 
     # Plotting
+
+    # 1. Loss Comparison
     plt.figure()
     for name in models:
+        plt.plot(np.arange(len(results[name]['train_loss'])) * args.eval_interval, results[name]['train_loss'], '--', label=f"{name} train loss", alpha=0.7)
         plt.plot(np.arange(len(results[name]['val_loss'])) * args.eval_interval, results[name]['val_loss'], label=f"{name} val loss")
     plt.xlabel("Step")
     plt.ylabel("Loss")
-    plt.title("Validation Loss Comparison")
+    plt.title("Train/Val Loss Comparison")
     plt.legend()
     plt.savefig(os.path.join(args.out, "loss_comparison.png"))
     plt.close()
+
+    # 2. Accuracy Comparison
+    plt.figure()
+    for name in models:
+        plt.plot(np.arange(len(results[name]['val_acc'])) * args.eval_interval, results[name]['val_acc'], label=f"{name} val acc")
+    plt.xlabel("Step")
+    plt.ylabel("Accuracy")
+    plt.title("Validation Accuracy Comparison")
+    plt.legend()
+    plt.savefig(os.path.join(args.out, "accuracy_comparison.png"))
+    plt.close()
+
+    # 3. CIB Norm (VELM only)
+    if len(results['velm']['cib_norm']) > 0:
+        plt.figure()
+        plt.plot(np.arange(len(results['velm']['cib_norm'])) * args.eval_interval, results['velm']['cib_norm'], label="VELM CIB norm", color='green')
+        plt.xlabel("Step")
+        plt.ylabel("Norm")
+        plt.title("VELM Continuous Information Bottleneck Norm")
+        plt.legend()
+        plt.savefig(os.path.join(args.out, "cib_norm.png"))
+        plt.close()
 
     # Save Results summary
     with open(os.path.join(args.out, 'summary.txt'), 'w') as f:
