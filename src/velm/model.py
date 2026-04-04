@@ -35,9 +35,9 @@ class VelmFull(nn.Module):
         super().__init__()
         self.vocab_size = vocab_size
         self.block_size = block_size
-        self.encoder = CALMEncoder(vocab_size, embed_dim=embed_dim, latent_dim=latent_dim)
+        self.encoder = CALMEncoder(vocab_size, block_size=block_size, embed_dim=embed_dim, latent_dim=latent_dim)
         self.core = VelmCore(latent_dim=latent_dim, state_dim=state_dim)
-        self.decoder = CALMDecoder(latent_dim=state_dim, hidden=state_dim, vocab_size=vocab_size)
+        self.decoder = CALMDecoder(latent_dim=state_dim, hidden=state_dim, vocab_size=vocab_size, block_size=block_size)
 
     def forward(self, history, use_adapter=False):
         # history: (B, L) where L divisible by block_size

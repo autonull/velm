@@ -121,25 +121,44 @@ def estimate_loss(model, data, model_name, eval_iters, batch_size, seq_len, bloc
         X, Y = X.to(device), Y.to(device)
 
         if model_name == 'velm':
+            # VELM is autoregressive across blocks. We want to predict the NEXT block.
+            # So state i should predict block i+1.
+            # To do this, we provide history up to N-1, and predict 1 to N.
+
+            # Shift X and Y
+            # For autoregressive block prediction, we can just encode the whole X,
+            # and use state[:, :-1] to predict Y blocks[:, 1:]
+
             states, latents = model(X) # states: (B, N, state_dim), latents: (B, N, latent_dim)
             B, N, _ = states.shape
             K = block_size
 
-            # For each block state i, we decode to predict tokens in block i.
-            # Technically state i should predict targets corresponding to block i.
-            # Y shape is (B, L) where L = N * K
+            # We use state[i] to predict block i+1. So we take states[:, :-1]
+            # and target blocks Y[:, 1:]
+            # But wait, Y already represents the shifted targets (next token).
+            # Y shape is (B, N*K). X is x[t], Y is x[t+1].
+            # Actually, standard LM targets Y are just X shifted by 1.
+            # In block-level autoregression:
+            # state i encodes X blocks 0..i.
+            # It should predict the next K tokens following X block i.
+            # Those tokens are exactly Y block i!
+            # Because X block i is [x_{i*K}, ..., x_{i*K+K-1}],
+            # Y block i is [x_{i*K+1}, ..., x_{i*K+K}].
+            # This is standard teacher-forcing.
 
             states_flat = states.view(B * N, -1)
-            logits_flat = model.decode_block_state(states_flat) # (B*N, V)
+            logits = model.decode_block_state(states_flat) # (B*N, K, V)
 
-            # Since decode_block_state returns a single prediction per block,
-            # let's map it to predicting the LAST token of each block for simplicity in this proxy.
+            targets = Y.view(B * N, K)
 
-            targets = Y.view(B, N, K)[:, :, -1] # (B, N)
-            loss = F.cross_entropy(logits_flat, targets.view(-1))
+            # Flatten to compute loss across all tokens
+            logits_flat = logits.view(-1, logits.size(-1)) # (B*N*K, V)
+            targets_flat = targets.view(-1)
+
+            loss = F.cross_entropy(logits_flat, targets_flat)
 
             preds = logits_flat.argmax(dim=-1)
-            acc = (preds == targets.view(-1)).float().mean().item()
+            acc = (preds == targets_flat).float().mean().item()
 
             cib = latents.norm(p=2, dim=2).mean().item()
             cib_norms.append(cib)
@@ -183,8 +202,8 @@ def main():
     train_data, val_data, vocab_size, stoi, itos = get_tiny_shakespeare(args.block_size)
     print(f"Vocab size: {vocab_size}, Train size: {len(train_data)}, Val size: {len(val_data)}")
 
-    # Instantiate VELM
-    velm = VelmFull(vocab_size=vocab_size, block_size=args.block_size, embed_dim=128, latent_dim=64, state_dim=128)
+    # Instantiate VELM scaled up to match Transformer
+    velm = VelmFull(vocab_size=vocab_size, block_size=args.block_size, embed_dim=128, latent_dim=128, state_dim=192)
     velm_params = count_params(velm)
 
     # Instantiate Transformer with roughly similar params
@@ -235,10 +254,17 @@ def main():
             if name == 'velm':
                 states, latents = model(X)
                 B, N, _ = states.shape
+                K = args.block_size
+
                 states_flat = states.view(B * N, -1)
-                logits_flat = model.decode_block_state(states_flat)
-                targets = Y.view(B, N, args.block_size)[:, :, -1] # Predict last token of block
-                loss = F.cross_entropy(logits_flat, targets.view(-1))
+                logits = model.decode_block_state(states_flat) # (B*N, K, V)
+
+                targets = Y.view(B * N, K)
+
+                logits_flat = logits.view(-1, logits.size(-1)) # (B*N*K, V)
+                targets_flat = targets.view(-1)
+
+                loss = F.cross_entropy(logits_flat, targets_flat)
 
                 # CIB Loss
                 cib_loss = 1e-3 * latents.norm(p=2, dim=2).mean()
