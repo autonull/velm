@@ -31,11 +31,11 @@ def test_velmfull_forward_and_step():
     # decode last block state and run a training step
     b_idx = n_blocks - 1
     state_at = states[:, b_idx, :]
-    logits = model.decode_block_state(state_at)  # (B, vocab)
-    assert logits.shape == (batch, vocab)
+    logits = model.decode_block_state(state_at)  # (B, K, vocab)
+    assert logits.shape == (batch, block_size, vocab)
 
-    targets = torch.randint(3, vocab, (batch,), dtype=torch.long)
-    loss = nn.functional.cross_entropy(logits, targets)
+    targets = torch.randint(3, vocab, (batch, block_size), dtype=torch.long)
+    loss = nn.functional.cross_entropy(logits.view(-1, vocab), targets.view(-1))
 
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
     opt.zero_grad()

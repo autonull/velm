@@ -318,6 +318,79 @@ def main():
         plt.savefig(os.path.join(args.out, "cib_norm.png"))
         plt.close()
 
+    # --- qTTT (Test-Time Training) Demonstration for VELM ---
+    print("\\n--- Running qTTT Adaptation Demonstration on VELM ---")
+
+    # We take a single long validation chunk to act as a "document".
+    # We split it into support (for adapting the adapter) and query (for testing).
+
+    # Context must be evenly divisible by block_size
+    document_len = 512
+    support_len = 256
+    query_len = 256
+
+    # Ensure val_data is long enough to grab document + 1 for offset target
+    start_idx = torch.randint(0, len(val_data) - document_len - 1, (1,)).item()
+    start_idx = (start_idx // args.block_size) * args.block_size
+
+    document_x = val_data[start_idx:start_idx+document_len].to(device)
+    document_y = val_data[start_idx+1:start_idx+document_len+1].to(device)
+
+    support_x = document_x[:support_len].unsqueeze(0) # (1, 256)
+    support_y = document_y[:support_len].unsqueeze(0)
+
+    query_x = document_x[support_len:support_len+query_len].unsqueeze(0) # (1, 256)
+    query_y = document_y[support_len:support_len+query_len].unsqueeze(0)
+
+    def eval_chunk(model, x, y):
+        model.eval()
+        with torch.no_grad():
+            states, latents = model(x, use_adapter=True)
+            B, N, _ = states.shape
+            K = args.block_size
+            states_flat = states.view(B * N, -1)
+            logits = model.decode_block_state(states_flat)
+            targets = y.view(B * N, K)
+            logits_flat = logits.view(-1, logits.size(-1))
+            targets_flat = targets.view(-1)
+            preds = logits_flat.argmax(dim=-1)
+            acc = (preds == targets_flat).float().mean().item()
+            return acc
+
+    # 1. Zero-shot baseline on the query chunk (adapter is initialized to identity/zero)
+    velm.eval()
+    zero_shot_acc = eval_chunk(velm, query_x, query_y)
+
+    # 2. Adapt only the adapter weights on the support chunk
+    adapter_params = [p for n, p in velm.named_parameters() if 'adapter' in n]
+    qttt_opt = torch.optim.AdamW(adapter_params, lr=1e-2)
+
+    velm.train()
+    adapt_steps = 25
+
+    for step in range(adapt_steps):
+        states, latents = velm(support_x, use_adapter=True)
+        B, N, _ = states.shape
+        K = args.block_size
+        states_flat = states.view(B * N, -1)
+        logits = velm.decode_block_state(states_flat)
+        targets = support_y.view(B * N, K)
+
+        logits_flat = logits.view(-1, logits.size(-1))
+        targets_flat = targets.view(-1)
+        loss = F.cross_entropy(logits_flat, targets_flat)
+
+        qttt_opt.zero_grad()
+        loss.backward()
+        qttt_opt.step()
+
+    # 3. Re-evaluate on query chunk with adapted weights
+    velm.eval()
+    adapted_acc = eval_chunk(velm, query_x, query_y)
+
+    print(f"qTTT Zero-shot Query Acc: {zero_shot_acc:.4f}")
+    print(f"qTTT Adapted Query Acc (after {adapt_steps} support steps): {adapted_acc:.4f}")
+
     # Save Results summary
     with open(os.path.join(args.out, 'summary.txt'), 'w') as f:
         f.write(f"Vocab size: {vocab_size}\\n")
@@ -328,6 +401,11 @@ def main():
             f.write(f"{name.upper()} Final Val Acc: {results[name]['val_acc'][-1]:.4f}\\n")
             if name == 'velm':
                 f.write(f"{name.upper()} Final CIB Norm: {results[name]['cib_norm'][-1]:.4f}\\n")
+
+        f.write(f"\\n--- qTTT Experiment ---\\n")
+        f.write(f"Zero-shot Acc: {zero_shot_acc:.4f}\\n")
+        f.write(f"Adapted Acc: {adapted_acc:.4f}\\n")
+
     print(f"Results saved to {args.out}/")
 
 if __name__ == '__main__':

@@ -1,0 +1,1 @@
+Vocab size: 65\nVELM params: 475636\nTransformer params: 314561\n\nTRANSFORMER Final Val Loss: 2.4056\nTRANSFORMER Final Val Acc: 0.2935\nVELM Final Val Loss: 1.6481\nVELM Final Val Acc: 0.5422\nVELM Final CIB Norm: 21.5516\n\n--- qTTT Experiment ---\nZero-shot Acc: 0.0625\nAdapted Acc: 0.0703\n

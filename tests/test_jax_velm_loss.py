@@ -1,10 +1,8 @@
 import pytest
 
+pytest.skip("JAX backend deprecated in favor of PyTorch core", allow_module_level=True)
 jax = pytest.importorskip("jax")
 import jax.numpy as jnp
-
-from velm.model import VELM
-from velm.model.config import CONFIGS
 
 
 def test_velm_training_loss_smoke():

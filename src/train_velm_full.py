@@ -52,7 +52,10 @@ def eval_accuracy(model, data, gaps, device, n_eval=128):
         b_idx = (qpos // model.block_size).long()
         state_at = states[torch.arange(batch.shape[0]), b_idx, :]
         logits = model.decode_block_state(state_at)
-        preds = logits.argmax(dim=1)
+        # Model now decodes K tokens. We just want the single target token corresponding to the question.
+        # Since it's a simplification, we just predict the last token of the block to align with original proxy.
+        logits_last = logits[:, -1, :]
+        preds = logits_last.argmax(dim=1)
         acc = (preds == targets).float().mean().item()
     model.train()
     return acc
@@ -75,7 +78,9 @@ def train_one_epoch(model, data, gaps, device, steps=50, batch_size=64, cib_lamb
         b_idx = (qpos // model.block_size).long()
         state_at = states[torch.arange(batch_data.shape[0]), b_idx, :]
         logits = model.decode_block_state(state_at)
-        loss = F.cross_entropy(logits, targets)
+        # Model now decodes K tokens. We just want the single target token corresponding to the question.
+        logits_last = logits[:, -1, :]
+        loss = F.cross_entropy(logits_last, targets)
         loss = cib(loss, latents[torch.arange(batch_data.shape[0]), b_idx, :])
         opt.zero_grad()
         loss.backward()
