@@ -115,11 +115,13 @@ def estimate_loss(model, data, model_name, eval_iters, batch_size, seq_len, bloc
     losses = []
     accs = []
     cib_norms = []
+    latencies = []
 
     for _ in range(eval_iters):
         X, Y = get_batch(data, batch_size, seq_len, block_size)
         X, Y = X.to(device), Y.to(device)
 
+        t0 = time.time()
         if model_name == 'velm':
             # VELM is autoregressive across blocks. We want to predict the NEXT block.
             # So state i should predict block i+1.
@@ -172,13 +174,16 @@ def estimate_loss(model, data, model_name, eval_iters, batch_size, seq_len, bloc
             preds = logits_flat.argmax(dim=-1)
             acc = (preds == targets).float().mean().item()
 
+        t1 = time.time()
+        latencies.append(t1 - t0)
+
         losses.append(loss.item())
         accs.append(acc)
 
     model.train()
     if model_name == 'velm':
-        return np.mean(losses), np.mean(accs), np.mean(cib_norms)
-    return np.mean(losses), np.mean(accs), None
+        return np.mean(losses), np.mean(accs), np.mean(cib_norms), np.mean(latencies)
+    return np.mean(losses), np.mean(accs), None, np.mean(latencies)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -219,34 +224,41 @@ def main():
         'velm': velm
     }
 
-    results = {'velm': {'train_loss':[], 'val_loss':[], 'val_acc':[], 'cib_norm':[]},
-               'transformer': {'train_loss':[], 'val_loss':[], 'val_acc':[]}}
+    results = {'velm': {'train_loss':[], 'val_loss':[], 'val_acc':[], 'cib_norm':[], 'val_latency':[], 'throughput':[]},
+               'transformer': {'train_loss':[], 'val_loss':[], 'val_acc':[], 'val_latency':[], 'throughput':[]}}
 
     for name, model in models.items():
         print(f"\\n--- Training {name.upper()} ---")
         model.to(device)
         optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+
         t0 = time.time()
         t_start_step = time.time()
         for iter_num in range(args.max_iters):
             if iter_num % args.eval_interval == 0 or iter_num == args.max_iters - 1:
-                train_loss, train_acc, cib_norm = estimate_loss(model, train_data, name, args.eval_iters, args.batch_size, args.seq_len, args.block_size, device)
-                val_loss, val_acc, val_cib_norm = estimate_loss(model, val_data, name, args.eval_iters, args.batch_size, args.seq_len, args.block_size, device)
+                train_loss, train_acc, cib_norm, train_lat = estimate_loss(model, train_data, name, args.eval_iters, args.batch_size, args.seq_len, args.block_size, device)
+                val_loss, val_acc, val_cib_norm, val_lat = estimate_loss(model, val_data, name, args.eval_iters, args.batch_size, args.seq_len, args.block_size, device)
 
                 results[name]['train_loss'].append(train_loss)
                 results[name]['val_loss'].append(val_loss)
                 results[name]['val_acc'].append(val_acc)
+                results[name]['val_latency'].append(val_lat)
                 if cib_norm is not None:
                     results[name]['cib_norm'].append(val_cib_norm)
 
                 t_end_step = time.time()
                 steps_per_sec = args.eval_interval / (t_end_step - t_start_step) if iter_num > 0 else 0
+                throughput = steps_per_sec * args.batch_size * args.seq_len
+                if iter_num > 0:
+                    results[name]['throughput'].append(throughput)
                 t_start_step = time.time()
 
                 print(f"Step {iter_num}: Train Loss {train_loss:.4f}, Val Loss {val_loss:.4f}, Val Acc {val_acc:.4f}" +
                       (f", CIB Norm {val_cib_norm:.4f}" if cib_norm is not None else "") +
-                      (f", Speed {steps_per_sec:.2f} steps/s" if iter_num > 0 else ""))
+                      (f", Speed {steps_per_sec:.2f} steps/s, Throughput {throughput:.2f} tokens/s" if iter_num > 0 else ""))
 
             X, Y = get_batch(train_data, args.batch_size, args.seq_len, args.block_size)
             X, Y = X.to(device), Y.to(device)
@@ -280,7 +292,15 @@ def main():
             optimizer.step()
 
         t1 = time.time()
+
+        peak_memory = 0
+        if torch.cuda.is_available():
+            peak_memory = torch.cuda.max_memory_allocated() / (1024 ** 2)
+        results[name]['peak_memory'] = peak_memory
+
         print(f"{name.upper()} Training Time: {t1-t0:.2f}s")
+        if peak_memory > 0:
+            print(f"{name.upper()} Peak Memory: {peak_memory:.2f} MB")
 
     # Plotting
 
@@ -399,10 +419,16 @@ def main():
         for name in models:
             f.write(f"{name.upper()} Final Val Loss: {results[name]['val_loss'][-1]:.4f}\\n")
             f.write(f"{name.upper()} Final Val Acc: {results[name]['val_acc'][-1]:.4f}\\n")
+            f.write(f"{name.upper()} Mean Val Latency: {np.mean(results[name]['val_latency']) * 1000:.2f} ms\n")
+            if len(results[name]['throughput']) > 0:
+                f.write(f"{name.upper()} Mean Throughput: {np.mean(results[name]['throughput']):.2f} tokens/s\n")
+            if results[name].get('peak_memory', 0) > 0:
+                f.write(f"{name.upper()} Peak Memory: {results[name]['peak_memory']:.2f} MB\n")
             if name == 'velm':
                 f.write(f"{name.upper()} Final CIB Norm: {results[name]['cib_norm'][-1]:.4f}\\n")
+            f.write("\n")
 
-        f.write(f"\\n--- qTTT Experiment ---\\n")
+        f.write(f"--- qTTT Experiment ---\n")
         f.write(f"Zero-shot Acc: {zero_shot_acc:.4f}\\n")
         f.write(f"Adapted Acc: {adapted_acc:.4f}\\n")
 
