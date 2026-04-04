@@ -101,6 +101,7 @@ def main():
     parser.add_argument('--process', action='store_true', help='Use multiprocessing pool for ES evaluation (requires picklable fitness_fn)')
     parser.add_argument('--evolve', choices=['adapter','all'], default='adapter', help='Which params to evolve')
     parser.add_argument('--alg', choices=['es','cma'], default='es', help='ES algorithm')
+    parser.add_argument('--sweep', action='store_true', help='Run a hyperparameter sweep over EGGROLL parameters')
     args = parser.parse_args()
     if args.device == 'auto':
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -138,7 +139,74 @@ def main():
     with open(os.path.join(args.out, 'prepost.txt'), 'w') as f:
         f.write(f"pre_acc={acc_pre}\n")
 
-    if args.eggroll:
+    if args.sweep:
+        print('Running EGGROLL Hyperparameter Sweep...')
+        import csv
+        import copy
+
+        # Define hyperparameter grid
+        algs = ['es', 'cma']
+        sigmas = [1e-2, 2e-2, 5e-2]
+        lrs = [0.05, 0.1, 0.2]
+
+        sweep_results = []
+        best_improvement = -float('inf')
+        best_params = None
+
+        # To ensure fair comparison, evaluate starting from the same base model
+        base_model_state = copy.deepcopy(model.state_dict())
+
+        for alg in algs:
+            for sigma in sigmas:
+                for lr in lrs:
+                    print(f"Testing config: alg={alg}, sigma={sigma}, lr={lr}")
+                    # reset model to pre-ES state
+                    model.load_state_dict(copy.deepcopy(base_model_state))
+
+                    es = Eggroll(sigma=sigma)
+                    def fitness(m):
+                        return eval_accuracy(m, train_x, train_gaps, device, n_eval=128)
+
+                    t_sweep_start = time.time()
+                    try:
+                        success = es.run_es(model, fitness, pop_size=args.pop, generations=args.gens, sigma=sigma, lr=lr, device=device, num_workers=args.workers, evolve=args.evolve, algorithm=alg, use_processes=args.process)
+                        acc_post = eval_accuracy(model, train_x, train_gaps, device, n_eval=256)
+                    except Exception as e:
+                        print(f"Run failed for {alg}, sigma={sigma}, lr={lr}: {e}")
+                        success = False
+                        acc_post = 0.0
+                    t_sweep_end = time.time()
+
+                    improvement = acc_post - acc_pre
+
+                    sweep_results.append({
+                        'alg': alg,
+                        'sigma': sigma,
+                        'lr': lr,
+                        'pre_acc': acc_pre,
+                        'post_acc': acc_post,
+                        'improvement': improvement,
+                        'time_s': t_sweep_end - t_sweep_start
+                    })
+
+                    if improvement > best_improvement:
+                        best_improvement = improvement
+                        best_params = {'alg': alg, 'sigma': sigma, 'lr': lr, 'post_acc': acc_post}
+
+        print("\n--- Sweep Completed ---")
+        print(f"Best Improvement: {best_improvement:.4f} with params: {best_params}")
+
+        # Write results to CSV
+        csv_path = os.path.join(args.out, 'sweep_results.csv')
+        with open(csv_path, 'w', newline='') as csvfile:
+            fieldnames = ['alg', 'sigma', 'lr', 'pre_acc', 'post_acc', 'improvement', 'time_s']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in sweep_results:
+                writer.writerow(row)
+        print(f"Sweep results saved to {csv_path}")
+
+    elif args.eggroll:
         print('Running EGGROLL ES tuning...')
         es = Eggroll(sigma=2e-2)
         def fitness(m):
