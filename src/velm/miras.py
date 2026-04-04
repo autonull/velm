@@ -12,12 +12,14 @@ class MirasMemory(nn.Module):
         # State + Key -> State (delta)
         self.update = nn.Sequential(
             nn.Linear(state_dim + key_dim, state_dim * 2),
+            nn.LayerNorm(state_dim * 2),
             nn.GELU(),
             nn.Linear(state_dim * 2, state_dim)
         )
         # Retention Gate: State + Key -> Retention vector
         self.retention_gate = nn.Sequential(
             nn.Linear(state_dim + key_dim, state_dim),
+            nn.LayerNorm(state_dim),
             nn.Sigmoid()
         )
 

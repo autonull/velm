@@ -17,20 +17,25 @@ class VelmCore(nn.Module):
         self.state_dim = state_dim
         self.use_swa = use_swa
 
+        self.latent_norm = nn.LayerNorm(latent_dim)
         self.memory = MirasMemory(key_dim=latent_dim, state_dim=state_dim)
+
         if self.use_swa:
+            self.swa_norm = nn.LayerNorm(state_dim)
             self.swa = SWALayer(dim=state_dim, num_heads=max(1, state_dim // 32), window_size=32)
 
         self.adapter = Adapter(state_dim, bottleneck=max(8, state_dim//4))
 
     def forward(self, latents, use_adapter=False):
         # latents: (B, n_blocks, latent_dim)
-        states = self.memory(latents)        # (B, n_blocks, state_dim)
+        norm_latents = self.latent_norm(latents)
+        states = self.memory(norm_latents)        # (B, n_blocks, state_dim)
 
         # Hybrid configuration: SWA provides local context, Miras provides long-range state
         if self.use_swa:
-            # Residual connection around SWA for stability
-            states = states + self.swa(states)
+            # Pre-LN Residual connection around SWA for stability
+            norm_states = self.swa_norm(states)
+            states = states + self.swa(norm_states)
 
         # optionally apply adapter to all states (qTTT)
         if use_adapter:
