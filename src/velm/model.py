@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from .calm import CALMEncoder, CALMDecoder
 from .miras import MirasMemory
-from .swa import SWALayer
+from .swa import SWALayer, RMSNorm
 from .qttt import Adapter
 
 class VelmCore(nn.Module):
@@ -17,11 +17,11 @@ class VelmCore(nn.Module):
         self.state_dim = state_dim
         self.use_swa = use_swa
 
-        self.latent_norm = nn.LayerNorm(latent_dim)
+        self.latent_norm = RMSNorm(latent_dim)
         self.memory = MirasMemory(key_dim=latent_dim, state_dim=state_dim)
 
         if self.use_swa:
-            self.swa_norm = nn.LayerNorm(state_dim)
+            self.swa_norm = RMSNorm(state_dim)
             self.swa = SWALayer(dim=state_dim, num_heads=max(1, state_dim // 32), window_size=32)
 
         self.adapter = Adapter(state_dim, bottleneck=max(8, state_dim//4))

@@ -1,8 +1,8 @@
-Vocab size: 65\nVELM params: 709540\nTransformer params: 712001\n\nTRANSFORMER Final Val Loss: 1.8171\nTRANSFORMER Final Val Acc: 0.4582\nTRANSFORMER Mean Val Latency: 133.34 ms
-TRANSFORMER Mean Throughput: 16000.55 tokens/s
+Vocab size: 65\nVELM params: 709412\nTransformer params: 712001\n\nTRANSFORMER Final Val Loss: 2.4765\nTRANSFORMER Final Val Acc: 0.2810\nTRANSFORMER Mean Val Latency: 124.62 ms
+TRANSFORMER Mean Throughput: 8402.83 tokens/s
 
-VELM Final Val Loss: 0.4927\nVELM Final Val Acc: 0.8637\nVELM Mean Val Latency: 41.85 ms
-VELM Mean Throughput: 74445.44 tokens/s
-VELM Final CIB Norm: 6.9130\n
+VELM Final Val Loss: 0.6155\nVELM Final Val Acc: 0.8290\nVELM Mean Val Latency: 43.51 ms
+VELM Mean Throughput: 35389.26 tokens/s
+VELM Final CIB Norm: 8.4013\n
 --- qTTT Experiment ---
-Zero-shot Acc: 0.0273\nAdapted Acc: 0.0664\n
+Zero-shot Acc: 0.0195\nAdapted Acc: 0.0508\n

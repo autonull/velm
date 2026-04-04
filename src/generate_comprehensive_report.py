@@ -185,31 +185,38 @@ def generate_report():
         for j in range(len(lrs)):
             text = ax6.text(j, i, f"{cma_grid[i, j]:.4f}", ha="center", va="center", color="black" if abs(cma_grid[i,j]) < 0.01 else "white")
 
-    # 5. Architecture Summary Text Box
+    # 5. Parameter Constraints & Architecture Summary
     ax7 = plt.subplot(3, 3, 6)
-    ax7.axis('off')
+
+    param_labels = ['VELM', 'Vanilla Transformer']
+    param_vals = [summary_data.get('velm_params', 0), summary_data.get('tf_params', 0)]
+
+    if param_vals[0] > 0 and param_vals[1] > 0:
+        ax7.barh(param_labels, param_vals, color=['teal', 'salmon'])
+        ax7.set_xlabel('Parameter Count')
+        ax7.set_title(f'Parameter Constraint Check (Vocab: {summary_data.get("vocab_size", "N/A")})', fontweight='bold')
+
+        # Add values inside bars
+        for i, v in enumerate(param_vals):
+            ax7.text(v - (max(param_vals)*0.05), i, f"{int(v):,}", color='white', fontweight='bold', va='center', ha='right')
+
+        ax7.invert_yaxis()
+    else:
+        ax7.axis('off')
 
     info_text = (
-        "VELM Architecture Enhancements Summary:\n\n"
-        "• Representation: CALM continuous vectors (K-chunked)\n"
-        "• Memory Backbone: Miras deep associative + LayerNorm\n"
-        "• SWA: Sliding Window Attention + Rotary Positional Embeddings\n"
-        "• Routing: Pre-LN architecture (stability & convergence)\n"
-        "• Training: EGGROLL gradient-free ES (ES vs CMA validated)\n"
-        "• Adaptation: qTTT query-only test-time tuning\n"
-        "• Efficiency: CIB compression (L2 constraint mapping)\n\n"
-        "Parameters (Tiny Shakespeare strict match):\n"
-        f"- Vocabulary Size: {summary_data.get('vocab_size', 'N/A')}\n"
-        f"- VELM Params: {summary_data.get('velm_params', 'N/A'):,}\n"
-        f"- Transformer Params: {summary_data.get('tf_params', 'N/A'):,}\n\n"
-        "Telemetry Highlights:\n"
-        f"- VELM Throughput: {summary_data.get('velm_throughput', 0):,.0f} tok/s\n"
-        f"- Transformer Throughput: {summary_data.get('tf_throughput', 0):,.0f} tok/s\n"
-        f"- Inference Latency reduction proven"
+        "VELM Enhancements:\n"
+        "• CALM continuous vectors (K-chunked)\n"
+        "• Miras deep associative + RMSNorm\n"
+        "• SWA + RoPE + Pre-LN architecture\n"
+        "• EGGROLL ES/CMA tuning\n"
+        "• qTTT adaptation\n"
+        "• CIB compression"
     )
 
-    ax7.text(0.05, 0.5, info_text, fontsize=13, va='center', ha='left',
-             bbox=dict(facecolor='lightcyan', alpha=0.5, boxstyle='round,pad=1', edgecolor='steelblue', linewidth=2))
+    # Overlay info box on the right side of the parameter chart area
+    plt.gcf().text(0.85, 0.5, info_text, fontsize=12, va='center', ha='left',
+             bbox=dict(facecolor='lightcyan', alpha=0.8, boxstyle='round,pad=1', edgecolor='steelblue', linewidth=2))
 
     # 6. Time-Series Training History Curves
     if len(history_data['step']) > 0:

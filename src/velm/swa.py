@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# Use PyTorch's native RMSNorm for performance
+RMSNorm = nn.RMSNorm
+
 class SWALayer(nn.Module):
     """Sliding Window Attention (SWA) layer to complement MirasMemory.
     Provides precise local context retrieval with a fixed window size.
@@ -20,6 +23,7 @@ class SWALayer(nn.Module):
         self.k_proj = nn.Linear(dim, dim)
         self.v_proj = nn.Linear(dim, dim)
         self.o_proj = nn.Linear(dim, dim)
+        self.pre_norm = RMSNorm(dim)
 
         # RoPE parameters (fixed base)
         self.register_buffer(
@@ -44,6 +48,7 @@ class SWALayer(nn.Module):
         return (x * cos) + (x_rotated * sin)
 
     def forward(self, x):
+        x = self.pre_norm(x)
         # x: (B, N, D)
         B, N, D = x.shape
 
