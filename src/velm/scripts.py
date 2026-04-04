@@ -32,7 +32,7 @@ def main() -> int:
 
     # Try importing and running a very small PyTorch proxy forward pass
     try:
-        from velm.velm import VelmFull  # type: ignore
+        from velm.model import VelmFull  # type: ignore
         import torch
 
         if VelmFull is None:
