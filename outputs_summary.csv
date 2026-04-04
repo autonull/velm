@@ -1,9 +1,0 @@
-run,pre_acc,post_acc,dir
-outputs,,,/home/me/velm/outputs
-outputs_extended,,,/home/me/velm/outputs_extended
-outputs_full,,,/home/me/velm/outputs_full
-outputs_full_cma_demo,0.00390625,0.0234375,/home/me/velm/outputs_full_cma_demo
-outputs_full_eggroll_demo,,0.01953125,/home/me/velm/outputs_full_eggroll_demo
-outputs_full_eggroll_demo2,0.00390625,0.0,/home/me/velm/outputs_full_eggroll_demo2
-outputs_full_smoke,,,/home/me/velm/outputs_full_smoke
-outputs_tuned,,,/home/me/velm/outputs_tuned

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import pytest
 
-from velm.model import VelmFull
+from velm.torch_proxy import VelmFull
 
 
 def test_velmfull_forward_and_step():
@@ -15,7 +15,9 @@ def test_velmfull_forward_and_step():
     L = 16
     batch = 4
 
-    model = VelmFull(vocab_size=vocab, block_size=block_size, embed_dim=16, latent_dim=16, state_dim=32)
+    model = VelmFull(
+        vocab_size=vocab, block_size=block_size, embed_dim=16, latent_dim=16, state_dim=32
+    )
     model.train()
 
     # create synthetic batch where L is divisible by block_size
