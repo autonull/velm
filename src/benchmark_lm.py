@@ -381,9 +381,16 @@ def main():
     velm.eval()
     zero_shot_acc = eval_chunk(velm, query_x, query_y)
 
-    # 2. Adapt only the adapter weights on the support chunk
-    adapter_params = [p for n, p in velm.named_parameters() if 'adapter' in n]
-    qttt_opt = torch.optim.AdamW(adapter_params, lr=1e-2)
+    # 2. Adapt adapter weights and SWA q_proj weights on the support chunk
+    qttt_params = []
+    for n, p in velm.named_parameters():
+        if 'adapter' in n:
+            qttt_params.append(p)
+        elif 'swa.q_proj' in n:
+            # Dual-path long context: qTTT adapts SWA query projections
+            qttt_params.append(p)
+
+    qttt_opt = torch.optim.AdamW(qttt_params, lr=1e-2)
 
     velm.train()
     adapt_steps = 25
