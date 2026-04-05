@@ -1,8 +1,8 @@
 # VELM: Vector-Evolution Language Model
 
-## A Self-Evolving, Continuous-Latent, Gradient-Free Language Model Architecture
+## A Self-Evolving, Continuous-Latent Language Model Architecture
 
-**Status:** Research Design Phase
+**Status:** Research — preliminary benchmarks complete, Full model training in progress
 
 ### Abstract
 
@@ -19,15 +19,56 @@ capabilities impossible under any single paradigm:
 - **Nonlinear RNNs become trainable** because EGGROLL eliminates the need for
   backpropagation through time
 - **Continuous-latent generation** becomes efficient because CALM compresses K
-  tokens into single vectors, reducing autoregressive steps by Kx
+  tokens into single vectors, reducing autoregressive steps by K×
 - **Deep memory** over continuous vectors replaces shallow linear recurrence with
   MLP-based associative memory that can actually track state
 - **Long-context failures** are fixed at inference time via query-only TTT,
   without retraining or growing the KV cache
 - **Reasoning efficiency** is enforced structurally via CIB, compressing
-  chain-of-thought by ~78% without accuracy loss
+  chain-of-thought without accuracy loss
 - **The entire system self-improves** through group evolution: populations of
   models share experience and evolve weights + workflows without human intervention
+
+### Two Implementations
+
+VELM is provided in two implementations that share the same high-level API
+and are drop-in replacements for each other:
+
+| | **VELM Full** | **VELM Lite** |
+|---|---|---|
+| **Framework** | JAX / Equinox | PyTorch |
+| **Compression** | CALM autoencoder (VAE-style) | Block mean-pooling |
+| **Memory** | Miras deep associative memory + SWA | Simple MLP memory |
+| **Decoding** | Energy-based generative head | Linear projection |
+| **Training** | EGGROLL (gradient-free ES) | Adam |
+| **Purpose** | Canonical research implementation | Fast iteration, prototyping, benchmarking |
+| **Params (tiny)** | ~817K | ~709K |
+
+Both implement the same architectural prior:
+```
+tokens → block compression → continuous latent memory → block decoding → tokens
+```
+
+### Preliminary Results
+
+Benchmarked on Tiny Shakespeare (~1.1M chars, 65-char vocabulary), strict
+parameter count matching (~700K each), 2000 training steps:
+
+| Metric | Transformer | VELM Lite | Delta |
+|---|---|---|---|
+| **Val Accuracy** | 49.7% | **86.3%** | **+36.6pp** |
+| **Val Loss** | 2.002 | **0.529** | **-73%** |
+| **Peak Memory** | 88.5 MB | **46.5 MB** | **-47%** |
+| **Throughput** | 134K tok/s | 50K tok/s | -63% |
+| **Train Time** | 30s | 81s | +2.7× |
+
+VELM Lite achieves near-doubled accuracy with half the memory at matched
+parameter count. The throughput penalty is expected — block-level autoregression
+cannot be parallelized like self-attention.
+
+**VELM Full** requires GPU + EGGROLL training (gradient-free evolution strategy).
+The energy-based head cannot be trained with standard backpropagation. See
+`experiments/train_velm_full_proper.py` for the proper two-phase training pipeline.
 
 ### Architecture Overview
 
@@ -62,34 +103,61 @@ capabilities impossible under any single paradigm:
 
 ```
 VELM/
-├── README.md                     # This file
+├── README.md
+├── FIX.md                        # Known issues to address
 ├── docs/
-│   ├── paper_outline.md          # Full paper structure
-│   ├── architecture.md           # Detailed architecture specification
-│   ├── synergies.md              # Cross-paper integration analysis
-│   ├── experiments.md            # Proposed experimental plan
-│   └── figures/                  # Diagrams and visualizations
-├── src/
-│   ├── model/                    # Model architecture (Miras + CALM)
-│   ├── training/                 # EGGROLL optimizer + CIB loss
-│   ├── inference/                # qTTT adaptation + CIB budget
-│   └── evolution/                # GEA self-improvement loop
-└── references/                   # Paper citations and notes
+│   ├── paper_outline.md
+│   ├── architecture.md
+│   ├── synergies.md
+│   ├── experiments.md
+│   └── figures/
+├── src/velm/
+│   ├── jax/                      # VELM Full — JAX/Equinox (canonical)
+│   │   ├── model/                # CALM, Miras, energy head, full VELM
+│   │   ├── training/             # EGGROLL optimizer + fitness
+│   │   ├── inference/            # qTTT + CIB budget
+│   │   └── evolution/            # GEA (fixed + multi-island)
+│   └── lite/                     # VELM Lite — PyTorch (fast iteration)
+├── experiments/
+│   ├── lib/                      # Shared: datasets, models, plots
+│   ├── run_all.py                # Turnkey runner (--smoketest)
+│   ├── benchmark_lm.py           # Transformer vs VELM Lite
+│   ├── train_velm_full_proper.py # VELM Full two-phase training
+│   ├── velm_vs_transformer.py    # Synthetic task comparison
+│   └── qttt_demo.py              # qTTT adaptation demo
+├── tests/
+└── results/                      # Experiment outputs (gitignored)
 ```
 
 ### Getting Started
 
-This project is in the research design phase. See:
-- `docs/architecture.md` for the full technical specification
-- `docs/paper_outline.md` for the paper structure
-- `docs/synergies.md` for how the six papers compose
+**Quick start — run all experiments in ~30 seconds:**
+```bash
+python experiments/run_all.py --smoketest
+```
 
-### Preliminary Results & Real-World Implications
+**Benchmark Transformer vs VELM Lite:**
+```bash
+python experiments/benchmark_lm.py                              # Tiny Shakespeare, default settings
+python experiments/benchmark_lm.py --dataset tiny_stories       # Different dataset
+python experiments/benchmark_lm.py --smoketest                  # Quick validation
+```
 
-Based on proxy benchmarking against Vanilla Transformers (e.g., `src/benchmark_lm.py` on synthetic tasks and Tiny Shakespeare):
+**Train VELM Full (requires GPU):**
+```bash
+# Phase 1: Pretrain autoencoder
+python experiments/train_velm_full_proper.py --phase 1 --ae-steps 500
 
-- **Massive Throughput Gains:** Because VELM compresses K-token chunks into continuous vectors (via CALM encoding) and evaluates them sequentially with Miras, its throughput (tokens/second) is significantly higher than equivalent-parameter Vanilla Transformers. This demonstrates strong edge computing viability where processing bandwidth is highly constrained.
-- **Improved Retention tracking:** The introduction of Miras Memory with dynamic retention gating enables deeper MLP-based associative state tracking, balancing the intake of new information against prior states.
-- **EGGROLL Trainability:** The project includes automated hyperparameter sweeps for EGGROLL tuning. While ES/CMA approaches naturally trade off direct accuracy improvement speeds compared to backpropagation over short epochs, they function autonomously and enable natively backprop-free components to be trained.
+# Phase 2: Train backbone + energy head with EGGROLL
+python experiments/train_velm_full_proper.py --phase 2 --ae-ckpt results/velm_full_train/ae_final.jax
+```
 
-*(Note: These findings are derived from simplified proxy benchmarks meant to study the scaling behaviour on modest compute, such as single GPU or CPU. They should be considered strictly preliminary.)*
+**Run tests:**
+```bash
+python -m pytest tests/ -v
+```
+
+### Known Issues
+
+See [`FIX.md`](FIX.md) for tracked issues and their status. The most critical
+(GEA/EGGROLL interface mismatch) has been fixed.
