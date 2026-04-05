@@ -109,6 +109,7 @@ class VELM(eqx.Module):
         Returns:
             (num_chunks, latent_dim) latent vectors
         """
+
         # encode each chunk (no training noise — just get targets)
         def encode_one(chunk: Int[Array, "K"]) -> Float[Array, "latent"]:
             z, _, _ = self.autoencoder.encode(chunk, training=False)
@@ -159,7 +160,7 @@ class VELM(eqx.Module):
         # 4. energy loss: predict z_{i+1} from h_i
         # shift: hidden_states[:-1] predicts target_z[1:]
         h_input = hidden_states[:-1]  # (S-1, dim)
-        z_target = target_z[1:]       # (S-1, l)
+        z_target = target_z[1:]  # (S-1, l)
         num_positions = h_input.shape[0]
 
         keys = jax.random.split(key, num_positions)
@@ -234,6 +235,7 @@ class VELM(eqx.Module):
         Returns:
             (num_steps, K) generated token IDs
         """
+
         # encode prompt through backbone to get initial states
         def compress_chunk(chunk_ids):
             embs = jax.vmap(self.autoencoder.embedding)(chunk_ids)
@@ -248,10 +250,165 @@ class VELM(eqx.Module):
         keys = jax.random.split(key, num_steps)
 
         for i in range(num_steps):
-            next_chunk, states = self.generate_step(
-                last_chunk, states, key=keys[i]
-            )
+            next_chunk, states = self.generate_step(last_chunk, states, key=keys[i])
             generated.append(next_chunk)
             last_chunk = next_chunk
 
         return jnp.stack(generated)  # (G, K)
+
+    def eval_batch(
+        self,
+        params,
+        token_ids: Int[Array, "B L"],
+        targets: Int[Array, "B L"],
+        *,
+        key: jax.Array,
+    ) -> tuple[Float[Array, ""], Float[Array, ""]]:
+        """Evaluate token-level cross-entropy loss and accuracy.
+
+        Provides a comparable metric to Transformer and VELM Lite benchmarks.
+        The full VELM uses energy-based training, but for evaluation we decode
+        predicted latent vectors and compute CE against target tokens.
+
+        Args:
+            params: model parameters
+            token_ids: (B, L) input tokens
+            targets: (B, L) target tokens (shifted by 1)
+            key: PRNG key for energy head sampling
+
+        Returns:
+            (mean_ce_loss, accuracy)
+        """
+        B, L = token_ids.shape
+        K = self.chunk_size
+        assert L % K == 0, f"Sequence length {L} not divisible by block_size {K}"
+        N = L // K
+
+        # Reshape into blocks
+        tokens_block = token_ids.reshape(B, N, K)
+        targets_block = targets.reshape(B, N, K)
+
+        # Encode each chunk to get target latents
+        def encode_chunk(chunk):
+            z, _, _ = self.autoencoder.encode(chunk, training=False)
+            return z
+
+        target_z = jax.vmap(jax.vmap(encode_chunk))(tokens_block)
+
+        # Build input representations
+        def compress_chunk(chunk):
+            embs = jax.vmap(self.autoencoder.embedding)(chunk)
+            return self.backbone.compress_input(embs)
+
+        input_seq = jax.vmap(jax.vmap(compress_chunk))(tokens_block)
+
+        # Backbone forward per batch
+        def process_batch(b_input):
+            hidden, _ = self.backbone(b_input)
+            return hidden
+
+        hidden_states = jax.vmap(process_batch)(input_seq)
+
+        # Energy head predicts latent vectors
+        keys = jax.random.split(key, B * N).reshape(B, N, -1)
+
+        def predict_one(h, k):
+            return self.head.predict(h, key=k)
+
+        z_pred = jax.vmap(jax.vmap(predict_one))(hidden_states, keys)
+
+        # Decode predicted latents to token logits
+        def decode_one(z):
+            return self.autoencoder.decode(z)
+
+        logits = jax.vmap(jax.vmap(decode_one))(z_pred)
+
+        # Compute CE loss and accuracy
+        logits_flat = logits.reshape(-1, logits.shape[-1])
+        targets_flat = targets_block.reshape(-1)
+        ce_loss = -jnp.mean(
+            jax.nn.log_softmax(logits_flat)[jnp.arange(targets_flat.size), targets_flat]
+        )
+        accuracy = jnp.mean(jnp.argmax(logits_flat, axis=-1) == targets_flat)
+
+        return ce_loss, accuracy
+
+    def eval_batch(
+        self,
+        params,
+        token_ids: Int[Array, "B L"],
+        targets: Int[Array, "B L"],
+        *,
+        key: jax.Array,
+        chunk_size: int | None = None,
+    ) -> tuple[Float[Array, ""], Float[Array, ""]]:
+        """Evaluate token-level cross-entropy loss and accuracy.
+
+        Provides a comparable metric to Transformer and VELM Lite benchmarks.
+        The full VELM uses energy-based training, but for evaluation we decode
+        predicted latent vectors and compute CE against target tokens.
+
+        Args:
+            params: model parameters
+            token_ids: (B, L) input tokens
+            targets: (B, L) target tokens (shifted by 1)
+            key: PRNG key for energy head sampling
+            chunk_size: block size K (defaults to self.chunk_size)
+
+        Returns:
+            (mean_ce_loss, accuracy)
+        """
+        B, L = token_ids.shape
+        K = chunk_size if chunk_size is not None else self.chunk_size
+        assert K is not None, "chunk_size must be provided or set on model"
+        assert L % K == 0, f"Sequence length {L} not divisible by block_size {K}"
+        N = L // K
+
+        # Reshape into blocks
+        tokens_block = token_ids.reshape(B, N, K)
+        targets_block = targets.reshape(B, N, K)
+
+        # Encode each chunk to get target latents
+        def encode_chunk(chunk):
+            z, _, _ = self.autoencoder.encode(chunk, training=False)
+            return z
+
+        target_z = jax.vmap(jax.vmap(encode_chunk))(tokens_block)
+
+        # Build input representations
+        def compress_chunk(chunk):
+            embs = jax.vmap(self.autoencoder.embedding)(chunk)
+            return self.backbone.compress_input(embs)
+
+        input_seq = jax.vmap(jax.vmap(compress_chunk))(tokens_block)
+
+        # Backbone forward per batch
+        def process_batch(b_input):
+            hidden, _ = self.backbone(b_input)
+            return hidden
+
+        hidden_states = jax.vmap(process_batch)(input_seq)
+
+        # Energy head predicts latent vectors
+        keys = jax.random.split(key, B * N).reshape(B, N, -1)
+
+        def predict_one(h, k):
+            return self.head.predict(h, key=k)
+
+        z_pred = jax.vmap(jax.vmap(predict_one))(hidden_states, keys)
+
+        # Decode predicted latents to token logits
+        def decode_one(z):
+            return self.autoencoder.decode(z)
+
+        logits = jax.vmap(jax.vmap(decode_one))(z_pred)
+
+        # Compute CE loss and accuracy
+        logits_flat = logits.reshape(-1, logits.shape[-1])
+        targets_flat = targets_block.reshape(-1)
+        ce_loss = -jnp.mean(
+            jax.nn.log_softmax(logits_flat)[jnp.arange(targets_flat.size), targets_flat]
+        )
+        accuracy = jnp.mean(jnp.argmax(logits_flat, axis=-1) == targets_flat)
+
+        return ce_loss, accuracy
