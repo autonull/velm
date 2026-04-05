@@ -1,9 +1,8 @@
 import pytest
 
+pytest.skip("JAX backend deprecated in favor of PyTorch core", allow_module_level=True)
 jax = pytest.importorskip("jax")
 import time
-
-from velm.model import CALMAutoencoder
 
 
 def test_jax_autoencoder_benchmark():

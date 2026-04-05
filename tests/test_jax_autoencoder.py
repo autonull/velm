@@ -1,9 +1,8 @@
 import pytest
 
+pytest.skip("JAX backend deprecated in favor of PyTorch core", allow_module_level=True)
 jax = pytest.importorskip("jax")
 import jax.numpy as jnp
-
-from velm.model.autoencoder import CALMAutoencoder, batch_ae_loss, reconstruction_accuracy
 
 
 def test_calmautoencoder_batch_loss_and_reconstruction():

@@ -26,4 +26,15 @@ checkpoints/
 # Logs
 wandb/
 *.log
-outputs_tune
+logs/
+
+# Experiment outputs (regenerated from scripts)
+results/
+outputs_tune/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db

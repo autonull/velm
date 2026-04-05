@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 # ensure src is importable
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import jax
 import jax.numpy as jnp
@@ -29,12 +29,16 @@ SEQ = 8
 
 def test_autoencoder_encode_decode():
     """Autoencoder forward pass: encode → decode → correct shapes."""
-    from src.model.autoencoder import CALMAutoencoder
+    from velm.jax.model.autoencoder import CALMAutoencoder
 
     key = jax.random.PRNGKey(0)
     model = CALMAutoencoder(
-        vocab_size=VOCAB, chunk_size=K, hidden_dim=DIM,
-        latent_dim=LATENT, ffn_intermediate=FFN, key=key,
+        vocab_size=VOCAB,
+        chunk_size=K,
+        hidden_dim=DIM,
+        latent_dim=LATENT,
+        ffn_intermediate=FFN,
+        key=key,
     )
 
     tokens = jax.random.randint(key, (K,), 0, VOCAB)
@@ -57,12 +61,16 @@ def test_autoencoder_encode_decode():
 
 def test_autoencoder_loss():
     """Autoencoder loss computes and returns metrics."""
-    from src.model.autoencoder import CALMAutoencoder, batch_ae_loss
+    from velm.jax.model.autoencoder import CALMAutoencoder, batch_ae_loss
 
     key = jax.random.PRNGKey(1)
     model = CALMAutoencoder(
-        vocab_size=VOCAB, chunk_size=K, hidden_dim=DIM,
-        latent_dim=LATENT, ffn_intermediate=FFN, key=key,
+        vocab_size=VOCAB,
+        chunk_size=K,
+        hidden_dim=DIM,
+        latent_dim=LATENT,
+        ffn_intermediate=FFN,
+        key=key,
     )
 
     k1, k2 = jax.random.split(key)
@@ -77,11 +85,14 @@ def test_autoencoder_loss():
 
 def test_energy_head():
     """Energy head generates samples and computes energy score."""
-    from src.model.energy_head import EnergyHead, energy_score
+    from velm.jax.model.energy_head import EnergyHead, energy_score
 
     key = jax.random.PRNGKey(2)
     head = EnergyHead(
-        hidden_dim=DIM, latent_dim=LATENT, num_blocks=2, key=key,
+        hidden_dim=DIM,
+        latent_dim=LATENT,
+        num_blocks=2,
+        key=key,
     )
 
     h = jax.random.normal(key, (DIM,))
@@ -101,7 +112,7 @@ def test_energy_head():
 
 def test_miras_layer():
     """Single Miras memory layer processes a sequence."""
-    from src.model.miras_backbone import MirasMemoryLayer
+    from velm.jax.model.miras_backbone import MirasMemoryLayer
 
     key = jax.random.PRNGKey(3)
     layer = MirasMemoryLayer(dim=DIM, num_heads=HEADS, key=key)
@@ -115,11 +126,14 @@ def test_miras_layer():
 
 def test_swa_layer():
     """Sliding window attention processes a sequence."""
-    from src.model.miras_backbone import SlidingWindowAttention
+    from velm.jax.model.miras_backbone import SlidingWindowAttention
 
     key = jax.random.PRNGKey(4)
     attn = SlidingWindowAttention(
-        dim=DIM, num_heads=HEADS, window_size=4, key=key,
+        dim=DIM,
+        num_heads=HEADS,
+        window_size=4,
+        key=key,
     )
 
     x = jax.random.normal(key, (SEQ, DIM))
@@ -130,13 +144,18 @@ def test_swa_layer():
 
 def test_backbone():
     """Full VELM backbone: interleaved Miras + SWA."""
-    from src.model.miras_backbone import VELMBackbone
+    from velm.jax.model.miras_backbone import VELMBackbone
 
     key = jax.random.PRNGKey(5)
     backbone = VELMBackbone(
-        dim=DIM, num_heads=HEADS, num_miras_layers=2,
-        num_swa_layers=2, ffn_intermediate=FFN,
-        chunk_size=K, window_size=4, key=key,
+        dim=DIM,
+        num_heads=HEADS,
+        num_miras_layers=2,
+        num_swa_layers=2,
+        ffn_intermediate=FFN,
+        chunk_size=K,
+        window_size=4,
+        key=key,
     )
 
     x = jax.random.normal(key, (SEQ, DIM))
@@ -148,8 +167,9 @@ def test_backbone():
 
 def test_eggroll_perturbation():
     """EGGROLL low-rank perturbation generation."""
-    from src.training.eggroll import (
-        generate_low_rank_perturbation, perturb_pytree,
+    from velm.jax.training.eggroll import (
+        generate_low_rank_perturbation,
+        perturb_pytree,
     )
 
     key = jax.random.PRNGKey(6)
@@ -178,8 +198,9 @@ def test_eggroll_perturbation():
 
 def test_eggroll_step():
     """EGGROLL optimizer step with tiny population."""
-    from src.training.eggroll import (
-        eggroll_step, create_eggroll_optimizer,
+    from velm.jax.training.eggroll import (
+        eggroll_step,
+        create_eggroll_optimizer,
     )
 
     key = jax.random.PRNGKey(7)
@@ -191,8 +212,14 @@ def test_eggroll_step():
     optimizer, state = create_eggroll_optimizer(params, learning_rate=1e-2)
 
     new_params, new_state, metrics = eggroll_step(
-        params, dummy_fitness, optimizer, state,
-        key=key, population_size=8, sigma=0.01, rank=1,
+        params,
+        dummy_fitness,
+        optimizer,
+        state,
+        key=key,
+        population_size=8,
+        sigma=0.01,
+        rank=1,
     )
 
     assert new_params["w"].shape == (DIM, DIM)
@@ -204,13 +231,17 @@ def test_eggroll_step():
 
 def test_cib_budget():
     """CIB budget controller decisions."""
-    from src.inference.cib_budget import (
-        CIBBudgetController, should_continue_reasoning,
-        estimate_difficulty, compute_info_gain,
+    from velm.jax.inference.cib_budget import (
+        CIBBudgetController,
+        should_continue_reasoning,
+        estimate_difficulty,
+        compute_info_gain,
     )
 
     controller = CIBBudgetController(
-        max_chunks=64, gain_threshold=0.01, warmup_chunks=4,
+        max_chunks=64,
+        gain_threshold=0.01,
+        warmup_chunks=4,
     )
 
     # during warmup, always continue
@@ -218,9 +249,7 @@ def test_cib_budget():
     assert should_continue_reasoning(controller, step=3, info_gains=[0.5])
 
     # after warmup with low gains, should stop
-    assert not should_continue_reasoning(
-        controller, step=10, info_gains=[0.001, 0.001, 0.001]
-    )
+    assert not should_continue_reasoning(controller, step=10, info_gains=[0.001, 0.001, 0.001])
 
     # at max chunks, always stop
     assert not should_continue_reasoning(controller, step=64, info_gains=[1.0])
@@ -240,8 +269,9 @@ def test_cib_budget():
 
 def test_gea_novelty():
     """GEA novelty computation and selection."""
-    from src.evolution.gea_eggroll import (
-        compute_novelty, performance_novelty_selection,
+    from velm.jax.evolution.gea_eggroll import (
+        compute_novelty,
+        performance_novelty_selection,
     )
 
     key = jax.random.PRNGKey(8)
