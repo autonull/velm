@@ -35,7 +35,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 
-from velm.torch_proxy import VelmFull
+from velm.lite import VelmFull
 
 import warnings
 from collections import deque

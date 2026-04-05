@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 import argparse
 import torch
 import torch.nn.functional as F
-from velm.torch_proxy import VelmFull
+from velm.lite import VelmFull
 
 QID = 1
 

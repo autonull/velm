@@ -20,9 +20,9 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from velm.torch_proxy import VelmFull
-from velm.torch_proxy.cib import CIBLoss
-from velm.torch_proxy.eggroll_stub import Eggroll
+from velm.lite import VelmFull
+from velm.lite.cib import CIBLoss
+from velm.lite.eggroll_stub import Eggroll
 
 random.seed(0)
 np.random.seed(0)

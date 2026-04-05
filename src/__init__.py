@@ -5,11 +5,11 @@ A self-evolving, continuous-latent, gradient-free language model architecture.
 
 Two implementations are provided:
   - velm.jax.*:       JAX/Equinox research implementation (canonical, high-fidelity)
-  - velm.torch_proxy.*: PyTorch proxy (lightweight, for fast experiments and debugging)
+  - velm.lite.*:      PyTorch implementation (lightweight, for fast experiments and debugging)
 
 Quick start:
   from velm.jax.model import VELM, CONFIGS          # research-scale model
-  from velm.torch_proxy import VelmFull              # fast proxy model
+  from velm.lite import VelmFull                     # fast iteration model
   from velm.jax.training import eggroll_step         # gradient-free optimizer
   from velm.jax.inference import apply_qttt          # test-time adaptation
   from velm.jax.evolution import GroupEvolver        # self-improvement loop
@@ -23,10 +23,10 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     VELM_JAX = None
 
-# PyTorch proxy (lightweight)
+# PyTorch lightweight implementation
 try:
-    from .torch_proxy import VelmFull as VELM_TORCH
+    from .lite import VelmFull as VELM_LITE
 except Exception:  # pragma: no cover - optional dependency
-    VELM_TORCH = None
+    VELM_LITE = None
 
-__all__ = ["VELM_JAX", "VELM_TORCH", "__version__"]
+__all__ = ["VELM_JAX", "VELM_LITE", "__version__"]

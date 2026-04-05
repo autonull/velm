@@ -3,7 +3,7 @@ import pytest
 
 pytestmark = pytest.mark.benchmark
 
-from velm.torch_proxy import VelmFull
+from velm.lite import VelmFull
 import torch
 
 

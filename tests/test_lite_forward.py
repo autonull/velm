@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import pytest
 
-from velm.torch_proxy import VelmFull
+from velm.lite import VelmFull
 
 
 def test_velmfull_forward_and_step():

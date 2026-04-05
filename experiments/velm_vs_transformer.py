@@ -283,7 +283,7 @@ def run_extended(args, device):
     # qTTT adaptation sweep on the trained VELM model
     # (For the proxy, this means testing adapter-based adaptation)
     print("\n--- qTTT Adaptation Sweep ---")
-    from velm.torch_proxy import VelmFull
+    from velm.lite import VelmFull
 
     VOCAB = 128
     SEQ_LEN = 33

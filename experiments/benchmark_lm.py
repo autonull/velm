@@ -23,7 +23,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from velm.torch_proxy import VelmFull
+from velm.lite import VelmFull
 
 # Reproducibility
 SEED = 42
