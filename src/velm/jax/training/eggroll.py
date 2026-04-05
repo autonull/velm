@@ -99,7 +99,7 @@ def perturb_pytree(
     )
 
 
-class EGGROLLState:
+class EGGROLLState(eqx.Module):
     """Optimizer state for EGGROLL.
 
     Wraps an optax optimizer state for applying Adam-like updates
@@ -110,6 +110,8 @@ class EGGROLLState:
         step: current training step
         base_params: the mean parameter matrix M
     """
+    opt_state: optax.OptState
+    step: int
 
     def __init__(
         self,
@@ -189,8 +191,16 @@ def eggroll_step(
         fitness = fitness_fn(perturbed)
         return fitness, perturbation
 
-    # jax.lax.map: sequential but JIT-compiled (vmap needs vmappable fn)
-    fitnesses_arr, perturbations_stacked = jax.lax.map(eval_member, keys)
+    # jax.lax.map can hang on CPU and blocks debugging in PyTorch proxy mode
+    # use native vmap over PyTrees using tree mapping
+
+    # We must explicitly vmap the member evaluation instead of lax.map to prevent hanging on CPU
+    def eval_member_vmap(member_key: jax.Array):
+        perturbed, perturbation = perturb_pytree(base_params, member_key, sigma, rank)
+        fitness = fitness_fn(perturbed)
+        return fitness, perturbation
+
+    fitnesses_arr, perturbations_stacked = jax.vmap(eval_member_vmap)(keys)
     # fitnesses_arr: (N,) scalar fitnesses
     # perturbations_stacked: pytree with leading dim N per leaf
 
@@ -218,18 +228,20 @@ def eggroll_step(
     neg_grad = jax.tree.map(lambda g: -g, es_grad)
 
     # apply Adam update
+    # In JAX, the optimizer state must be passed along with params when applying updates to avoid
+    # leaking tracers if `updates` or `opt_state` relies on previous dynamic tracing.
     updates, new_opt_state = optimizer.update(neg_grad, state.opt_state, base_params)
     new_params = optax.apply_updates(base_params, updates)
 
     # metrics
-    es_grad_leaves = jax.tree.leaves(es_grad)
+    es_grad_leaves = jax.tree_util.tree_leaves(es_grad)
+
     metrics = {
         "mean_fitness": jnp.mean(fitnesses_arr),
         "max_fitness": jnp.max(fitnesses_arr),
         "min_fitness": jnp.min(fitnesses_arr),
         "fitness_std": jnp.std(fitnesses_arr),
         "grad_norm": jnp.sqrt(sum(jnp.sum(l**2) for l in es_grad_leaves)),
-        "step": state.step,
     }
 
     new_state = EGGROLLState(new_opt_state, state.step + 1)
