@@ -1,0 +1,1 @@
+trained_steps=20 time=2.54315447807312 pre_acc=0.0078125

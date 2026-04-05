@@ -101,8 +101,8 @@ class TunerConfig:
     use_umap: bool = True
 
 
-def train_and_eval(cfg: TunerConfig, hparams: dict) -> tuple[float, int]:
-    """Train the VelmFull proxy for a few steps and return (accuracy, param_count)."""
+def train_and_eval(cfg: TunerConfig, hparams: dict) -> tuple[float, int, float]:
+    """Train the VelmFull proxy for a few steps and return (accuracy, param_count, time_elapsed)."""
     # dataset small enough for commodity hardware
     train_n = 800
     test_n = 200
@@ -133,6 +133,7 @@ def train_and_eval(cfg: TunerConfig, hparams: dict) -> tuple[float, int]:
 
     N = train_x.shape[0]
 
+    t0 = time.time()
     for step in range(steps):
         idx = torch.randint(0, N, (batch_size,))
         batch = train_x[idx].to(device)
@@ -142,6 +143,10 @@ def train_and_eval(cfg: TunerConfig, hparams: dict) -> tuple[float, int]:
         states, latents = model(hist)
         b_idx = (q_pos // hparams["block_size"]).long()
         logits_at = model.decode_block_state(states[torch.arange(states.shape[0]), b_idx, :])
+        # decode_block_state returns (B, K, vocab_size).
+        # We need the logits corresponding to the q_pos relative to its block.
+        rel_q_pos = q_pos % hparams["block_size"]
+        logits_at = logits_at[torch.arange(logits_at.shape[0]), rel_q_pos, :]
         loss = F.cross_entropy(logits_at, targets)
         # CIB proxy
         lat_q = latents[torch.arange(latents.shape[0]), b_idx, :]
@@ -150,6 +155,8 @@ def train_and_eval(cfg: TunerConfig, hparams: dict) -> tuple[float, int]:
         opt.zero_grad()
         loss.backward()
         opt.step()
+    t1 = time.time()
+    elapsed_time = t1 - t0
 
     # Eval
     model.eval()
@@ -163,12 +170,14 @@ def train_and_eval(cfg: TunerConfig, hparams: dict) -> tuple[float, int]:
             states, latents = model(hist)
             b_idx = (q_pos // hparams["block_size"]).long()
             logits_at = model.decode_block_state(states[torch.arange(states.shape[0]), b_idx, :])
+            rel_q_pos = q_pos % hparams["block_size"]
+            logits_at = logits_at[torch.arange(logits_at.shape[0]), rel_q_pos, :]
             targets = batch[torch.arange(batch.shape[0]), q_pos + 1].to(device)
             pred = logits_at.argmax(dim=1)
             correct += (pred == targets).sum().item()
     acc = correct / test_x.shape[0]
     param_count = count_parameters(model)
-    return acc, param_count
+    return acc, param_count, elapsed_time
 
 
 def objective(trial: optuna.trial.Trial, cfg: TunerConfig) -> float:
@@ -180,7 +189,8 @@ def objective(trial: optuna.trial.Trial, cfg: TunerConfig) -> float:
     latent_max = max(embed_dim, min(256, embed_dim * 2))
     latent_dim = trial.suggest_int("latent_dim", latent_min, latent_max, step=8)
     # allow larger state dimensions for expressivity
-    state_dim = trial.suggest_int("state_dim", 32, 512, step=16)
+    # State dim must be divisible by num_heads = max(1, state_dim // 32)
+    state_dim = trial.suggest_categorical("state_dim", [32, 64, 128, 256, 512])
     block_size = trial.suggest_categorical("block_size", [1, 2, 4, 8])
     # wider LR search and allow smaller rates
     lr = trial.suggest_float("lr", 1e-5, 1e-2, log=True)
@@ -199,7 +209,7 @@ def objective(trial: optuna.trial.Trial, cfg: TunerConfig) -> float:
     }
 
     # train and evaluate
-    acc, param_count = train_and_eval(cfg, hparams)
+    acc, param_count, elapsed_time = train_and_eval(cfg, hparams)
 
     # combined score (maximize): accuracy - penalty * params_in_millions
     params_m = param_count / 1e6
@@ -209,6 +219,7 @@ def objective(trial: optuna.trial.Trial, cfg: TunerConfig) -> float:
     trial.set_user_attr("accuracy", float(acc))
     trial.set_user_attr("param_count", int(param_count))
     trial.set_user_attr("params_millions", float(params_m))
+    trial.set_user_attr("time_elapsed", float(elapsed_time))
     trial.report(score, step=0)
 
     return score
@@ -436,6 +447,7 @@ def ui_thread_fn(
             table.add_column("Trial", style="magenta", width=6)
             table.add_column("Value", style="green", width=9)
             table.add_column("Acc", style="yellow", width=7)
+            table.add_column("Time(s)", style="blue", width=7)
             table.add_column("Params(M)", style="cyan", width=10)
             table.add_column("Block", style="white", width=6)
             table.add_column("Embed", style="white", width=7)
@@ -452,12 +464,14 @@ def ui_thread_fn(
             for i, t in enumerate(sorted_trials[: min(20, len(sorted_trials))]):
                 acc = t.user_attrs.get("accuracy", "-")
                 pm = t.user_attrs.get("params_millions", "-")
+                tm = t.user_attrs.get("time_elapsed", "-")
                 params = t.params
                 table.add_row(
                     str(i + 1),
                     str(t.number),
                     f"{t.value:.4f}",
                     f"{acc:.4f}" if isinstance(acc, float) else str(acc),
+                    f"{tm:.2f}" if isinstance(tm, float) else str(tm),
                     f"{pm:.3f}" if isinstance(pm, float) else str(pm),
                     str(params.get("block_size", "-")),
                     str(params.get("embed_dim", "-")),
