@@ -13,11 +13,11 @@ Key simplifications vs. the JAX implementation:
 """
 
 from .calm import CALMEncoder, CALMDecoder
-from .miras import MirasMemory
+from .miras import MirasMemoryLayer as MirasMemory # keep alias for compatibility if needed elsewhere
 from .cib import CIBLoss
 from .qttt import Adapter
 from .eggroll_stub import Eggroll
-from .model import VelmFull
+from .model import VelmHybrid, VelmFull
 
 __all__ = [
     "CALMEncoder",
@@ -26,5 +26,6 @@ __all__ = [
     "CIBLoss",
     "Adapter",
     "Eggroll",
+    "VelmHybrid",
     "VelmFull",
 ]
