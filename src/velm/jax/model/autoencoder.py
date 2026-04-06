@@ -53,6 +53,7 @@ class Encoder(eqx.Module):
     refine_ffn: FFN
     to_mu: eqx.nn.Linear
     to_logvar: eqx.nn.Linear
+    dynamic_k_router: eqx.nn.Linear
     chunk_size: int
     hidden_dim: int
     latent_dim: int
@@ -68,7 +69,7 @@ class Encoder(eqx.Module):
         key: jax.Array,
         dynamic_k: bool = False,
     ) -> None:
-        k1, k2, k3, k4, k5 = jax.random.split(key, 5)
+        k1, k2, k3, k4, k5, k6 = jax.random.split(key, 6)
         self.chunk_size = chunk_size
         self.hidden_dim = hidden_dim
         self.latent_dim = latent_dim
@@ -76,6 +77,12 @@ class Encoder(eqx.Module):
 
         # position-wise FFN applied to each token embedding
         self.token_ffn = FFN(hidden_dim, ffn_intermediate, key=k1)
+
+        # dynamic K router: determines token significance inside the chunk
+        self.dynamic_k_router = eqx.nn.Linear(
+            hidden_dim, 1, use_bias=True, key=k6
+        )
+
         # flatten K*d → d
         self.flatten_proj = eqx.nn.Linear(
             chunk_size * hidden_dim, hidden_dim, use_bias=False, key=k2
@@ -115,10 +122,15 @@ class Encoder(eqx.Module):
             h = h * token_mask
 
         # OPTIONAL EXTENSION HOOK: Adaptive K Routing
-        # If dynamic_k is enabled, we could insert a tiny router here
-        # to determine effective chunk size before flattening.
-        # Currently unimplemented placeholder to allow future integration
-        # without breaking the base encoder API.
+        if self.dynamic_k:
+            # The router predicts a score for each token in the chunk
+            # Softmax creates a probability distribution, which we scale by K
+            # to preserve magnitude. Tokens with score near 0 are effectively "dropped".
+            # This allows the continuous vector to focus only on the most important tokens,
+            # effectively reducing the active chunk size based on content.
+            router_scores = jax.vmap(self.dynamic_k_router)(h) # (K, 1)
+            attention_weights = jax.nn.softmax(router_scores, axis=0) * k # (K, 1)
+            h = h * attention_weights
 
         # 3. flatten K×d → d
         h_flat = h.reshape(-1)  # (K*d,)

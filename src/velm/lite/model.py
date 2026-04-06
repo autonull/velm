@@ -77,6 +77,59 @@ class VelmFull(nn.Module):
         # state_block: (B, state_dim)
         return self.decoder(state_block)
 
+    @torch.no_grad()
+    def generate(self, prompt, max_new_blocks=10, use_adapter=False, cib_threshold=0.01, min_reasoning_blocks=2):
+        """
+        Generates new tokens using dynamic CIB inference.
+        Reasoning is terminated early if the information gain (cosine distance)
+        between consecutive latent states falls below cib_threshold.
+        """
+        self.eval()
+        B, L = prompt.shape
+        device = prompt.device
+
+        # Ensure prompt is divisible by block size
+        K = self.block_size
+        if L % K != 0:
+            pad_len = K - (L % K)
+            # Pad with 0s for simplicity
+            prompt = torch.cat([prompt, torch.zeros(B, pad_len, dtype=torch.long, device=device)], dim=1)
+
+        current_history = prompt
+        generated_blocks = []
+
+        prev_state = None
+        for step in range(max_new_blocks):
+            states, latents = self(current_history, use_adapter=use_adapter)
+
+            # The state corresponding to the last block
+            last_state = states[:, -1, :] # (B, state_dim)
+
+            # CIB Dynamic Termination Check
+            if prev_state is not None and step >= min_reasoning_blocks:
+                # Calculate cosine distance as information gain proxy
+                # High similarity -> low distance -> low information gain
+                cos_sim = torch.nn.functional.cosine_similarity(prev_state, last_state, dim=-1)
+                info_gain = 1.0 - cos_sim
+
+                # If info_gain across the batch is generally below threshold, terminate early
+                if info_gain.mean().item() < cib_threshold:
+                    break
+
+            prev_state = last_state
+
+            # Decode the last state into new tokens
+            new_logits = self.decode_block_state(last_state) # (B, K, vocab_size)
+            new_tokens = new_logits.argmax(dim=-1) # (B, K)
+
+            generated_blocks.append(new_tokens)
+            current_history = torch.cat([current_history, new_tokens], dim=1)
+
+        self.train()
+        if not generated_blocks:
+            return prompt
+        return torch.cat(generated_blocks, dim=1)
+
     @property
     def adapter(self):
         return self.core.adapter
