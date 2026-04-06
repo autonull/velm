@@ -103,17 +103,17 @@ class VelmHybrid(nn.Module):
         # CALM Decoder maps state back to tokens
         self.decoder = CALMDecoder(latent_dim=state_dim, hidden=state_dim, vocab_size=vocab_size, block_size=block_size)
 
-    def forward(self, history, use_adapter=False):
+    def forward(self, history, use_adapter=False, return_cib_loss=False):
         B, L = history.shape
         K = self.block_size
-        assert L % K == 0
-        n_blocks = L // K
-        blocks = history.view(B, n_blocks, K)
 
+        # Adaptive K sequence chunking: allow sequences not divisible by block_size
         latents = []
-        for i in range(n_blocks):
-            lat = self.encoder(blocks[:, i, :])
+        for start_idx in range(0, L, K):
+            chunk = history[:, start_idx:start_idx+K]
+            lat = self.encoder(chunk)
             latents.append(lat.unsqueeze(1))
+
         latents = torch.cat(latents, dim=1) # (B, n_blocks, latent)
 
         # Compress latent to state
@@ -132,10 +132,14 @@ class VelmHybrid(nn.Module):
         if use_adapter:
             x = self.adapter(x)
 
+        if return_cib_loss:
+            cib_loss = latents.norm(p=2, dim=2).mean()
+            return x, latents, cib_loss
+
         return x, latents
 
-    def decode_block_state(self, state_block):
-        return self.decoder(state_block)
+    def decode_block_state(self, state_block, target_K=None):
+        return self.decoder(state_block, target_K=target_K)
 
 class VelmCore(nn.Module):
     """Core VELM sequential backbone.
@@ -188,26 +192,34 @@ class VelmFull(nn.Module):
         self.core = VelmCore(latent_dim=latent_dim, state_dim=state_dim)
         self.decoder = CALMDecoder(latent_dim=state_dim, hidden=state_dim, vocab_size=vocab_size, block_size=block_size)
 
-    def forward(self, history, use_adapter=False):
-        # history: (B, L) where L divisible by block_size
+    def forward(self, history, use_adapter=False, return_cib_loss=False):
+        # history: (B, L) where L does not need to be divisible by block_size
         B, L = history.shape
         K = self.block_size
-        assert L % K == 0
-        n_blocks = L // K
-        blocks = history.view(B, n_blocks, K)
-        # encode each block
+
+        # Adaptive K sequence chunking: allow sequences not divisible by block_size
         latents = []
-        for i in range(n_blocks):
-            lat = self.encoder(blocks[:, i, :])
+        for start_idx in range(0, L, K):
+            chunk = history[:, start_idx:start_idx+K]
+            lat = self.encoder(chunk)
             latents.append(lat.unsqueeze(1))
+
         latents = torch.cat(latents, dim=1)  # (B, n_blocks, latent)
 
         states = self.core(latents, use_adapter=use_adapter)
+
+        if return_cib_loss:
+            # Conditional Information Bottleneck (CIB) heuristic loss
+            # Enforce that the latent norm is bounded (pruning cognitive bloat)
+            # This is a structural penalty to compress continuous vectors
+            cib_loss = latents.norm(p=2, dim=2).mean()
+            return states, latents, cib_loss
+
         return states, latents
 
-    def decode_block_state(self, state_block):
+    def decode_block_state(self, state_block, target_K=None):
         # state_block: (B, state_dim)
-        return self.decoder(state_block)
+        return self.decoder(state_block, target_K=target_K)
 
     @property
     def adapter(self):

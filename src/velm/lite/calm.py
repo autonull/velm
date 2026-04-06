@@ -14,8 +14,8 @@ class SwiGLU(nn.Module):
         return self.w3(F.silu(self.w1(x)) * self.w2(x))
 
 class CALMEncoder(nn.Module):
-    """Compress K tokens into one continuous vector (simple proxy).
-    Implementation: embed tokens, flatten to preserve order, then MLP projection.
+    """Compress K tokens into one continuous vector.
+    Adaptive K support: Pads smaller chunks to max block_size before MLP projection.
     """
     def __init__(self, vocab_size, block_size=4, embed_dim=64, latent_dim=64):
         super().__init__()
@@ -28,7 +28,17 @@ class CALMEncoder(nn.Module):
         # tokens: (B, K)
         B, K = tokens.shape
         emb = self.embed(tokens)  # (B, K, E)
-        flat = emb.view(B, K * emb.size(-1)) # (B, K*E)
+
+        # Adaptive chunk size: pad with zeros if K < block_size
+        if K < self.block_size:
+            pad_len = self.block_size - K
+            pad_tensor = torch.zeros(B, pad_len, emb.size(-1), device=emb.device, dtype=emb.dtype)
+            emb = torch.cat([emb, pad_tensor], dim=1) # (B, block_size, E)
+        elif K > self.block_size:
+            # truncate if larger (should not happen in proper usage)
+            emb = emb[:, :self.block_size, :]
+
+        flat = emb.view(B, self.block_size * emb.size(-1)) # (B, max_K*E)
         lat = self.proj(flat)     # (B, latent)
         return lat
 
@@ -51,10 +61,16 @@ class CALMDecoder(nn.Module):
         self.blocks = nn.Sequential(*[ResidualBlock(latent_dim, hidden) for _ in range(num_blocks)])
         self.head = nn.Linear(latent_dim, vocab_size * block_size)
 
-    def forward(self, latent):
+    def forward(self, latent, target_K=None):
         # latent: (..., latent_dim)
-        # out: (..., block_size, vocab_size)
+        # target_K: optional dynamic sequence length to return.
+        # out: (..., K, vocab_size)
         h = self.blocks(latent)
         out = self.head(h)
         shape = list(out.shape[:-1]) + [self.block_size, self.vocab_size]
-        return out.view(*shape)
+        out = out.view(*shape)
+
+        # Adaptive chunk size support: Truncate output to target_K if specified
+        if target_K is not None and target_K < self.block_size:
+            out = out[..., :target_K, :]
+        return out

@@ -21,7 +21,18 @@ import torch
 def _download_if_missing(path, url):
     if not os.path.exists(path):
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        data = urlopen(url).read().decode("utf-8")
+        # Limit download to avoid OOM for large datasets like TinyStories
+        import urllib.request
+        req = urllib.request.Request(url)
+        req.headers['Range'] = 'bytes=0-5000000'
+        try:
+            data = urlopen(req).read().decode("utf-8", errors="ignore")
+        except urllib.error.HTTPError as e:
+            if e.code == 206: # Partial Content
+                data = e.read().decode("utf-8", errors="ignore")
+            else:
+                data = urlopen(url).read().decode("utf-8", errors="ignore")
+                data = data[:5000000]
         with open(path, "w") as f:
             f.write(data)
 
@@ -40,7 +51,7 @@ def get_tiny_shakespeare(block_size=4, data_dir="data"):
     _download_if_missing(path, url)
 
     with open(path, "r") as f:
-        data = f.read()
+        data = f.read(5000000)  # Limit to 5MB to avoid OOM in sandbox
 
     chars = sorted(list(set(data)))
     vocab_size = len(chars)
@@ -80,7 +91,7 @@ def get_shakespeare_full(block_size=4, data_dir="data"):
     _download_if_missing(path, url)
 
     with open(path, "r") as f:
-        data = f.read()
+        data = f.read(5000000)  # Limit to 5MB to avoid OOM in sandbox
 
     chars = sorted(list(set(data)))
     vocab_size = len(chars)
@@ -113,7 +124,7 @@ def get_tiny_stories(block_size=4, data_dir="data"):
     _download_if_missing(path, url)
 
     with open(path, "r", encoding="utf-8") as f:
-        data = f.read()
+        data = f.read(5000000)  # Limit to 5MB to avoid OOM in sandbox
 
     # Use character-level tokenization for consistency
     chars = sorted(list(set(data)))
