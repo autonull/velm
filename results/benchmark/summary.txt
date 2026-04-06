@@ -1,0 +1,29 @@
+Dataset: tiny_shakespeare
+Vocab size: 65
+
+TRANSFORMER params: 1374401
+TRANSFORMER Final Val Loss: 1.8874
+TRANSFORMER Final Val Acc: 0.4411
+TRANSFORMER Mean Val Latency: 228.82 ms
+TRANSFORMER Mean Throughput: 4552.64 tok/s
+
+VELM_LITE params: 709412
+VELM_LITE Final Val Loss: 0.4908
+VELM_LITE Final Val Acc: 0.8617
+VELM_LITE Mean Val Latency: 45.61 ms
+VELM_LITE Mean Throughput: 33341.43 tok/s
+VELM_LITE Final CIB Norm: 6.3248
+
+VELM_HYBRID_FAST params: 923236
+VELM_HYBRID_FAST Final Val Loss: 0.6364
+VELM_HYBRID_FAST Final Val Acc: 0.8229
+VELM_HYBRID_FAST Mean Val Latency: 126.19 ms
+VELM_HYBRID_FAST Mean Throughput: 11936.34 tok/s
+VELM_HYBRID_FAST Final CIB Norm: 14.5273
+
+VELM_HYBRID_DEEP params: 1286820
+VELM_HYBRID_DEEP Final Val Loss: 1.6992
+VELM_HYBRID_DEEP Final Val Acc: 0.5642
+VELM_HYBRID_DEEP Mean Val Latency: 215.93 ms
+VELM_HYBRID_DEEP Mean Throughput: 6392.12 tok/s
+VELM_HYBRID_DEEP Final CIB Norm: 4.0370
