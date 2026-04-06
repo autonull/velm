@@ -1,29 +1,29 @@
 Dataset: tiny_shakespeare
 Vocab size: 65
 
-TRANSFORMER params: 1374401
-TRANSFORMER Final Val Loss: 1.8950
-TRANSFORMER Final Val Acc: 0.4382
-TRANSFORMER Mean Val Latency: 228.66 ms
-TRANSFORMER Mean Throughput: 4446.78 tok/s
+TRANSFORMER params: 712001
+TRANSFORMER Final Val Loss: 1.9646
+TRANSFORMER Final Val Acc: 0.4171
+TRANSFORMER Mean Val Latency: 110.71 ms
+TRANSFORMER Mean Throughput: 9042.87 tok/s
 
 VELM_LITE params: 709412
-VELM_LITE Final Val Loss: 0.5006
-VELM_LITE Final Val Acc: 0.8597
-VELM_LITE Mean Val Latency: 52.66 ms
-VELM_LITE Mean Throughput: 29946.65 tok/s
-VELM_LITE Final CIB Norm: 6.3545
+VELM_LITE Final Val Loss: 0.5049
+VELM_LITE Final Val Acc: 0.8606
+VELM_LITE Mean Val Latency: 45.38 ms
+VELM_LITE Mean Throughput: 33281.13 tok/s
+VELM_LITE Final CIB Norm: 6.4968
 
 VELM_HYBRID_FAST params: 780924
-VELM_HYBRID_FAST Final Val Loss: 1.7181
-VELM_HYBRID_FAST Final Val Acc: 0.5420
-VELM_HYBRID_FAST Mean Val Latency: 137.30 ms
-VELM_HYBRID_FAST Mean Throughput: 10035.11 tok/s
-VELM_HYBRID_FAST Final CIB Norm: 15.1032
+VELM_HYBRID_FAST Final Val Loss: 0.9378
+VELM_HYBRID_FAST Final Val Acc: 0.7420
+VELM_HYBRID_FAST Mean Val Latency: 146.22 ms
+VELM_HYBRID_FAST Mean Throughput: 9934.18 tok/s
+VELM_HYBRID_FAST Final CIB Norm: 10.3844
 
 VELM_HYBRID_DEEP params: 711644
-VELM_HYBRID_DEEP Final Val Loss: 1.3627
-VELM_HYBRID_DEEP Final Val Acc: 0.6428
-VELM_HYBRID_DEEP Mean Val Latency: 150.91 ms
-VELM_HYBRID_DEEP Mean Throughput: 9344.52 tok/s
-VELM_HYBRID_DEEP Final CIB Norm: 4.4157
+VELM_HYBRID_DEEP Final Val Loss: 1.8535
+VELM_HYBRID_DEEP Final Val Acc: 0.5037
+VELM_HYBRID_DEEP Mean Val Latency: 151.20 ms
+VELM_HYBRID_DEEP Mean Throughput: 9664.85 tok/s
+VELM_HYBRID_DEEP Final CIB Norm: 16.9730

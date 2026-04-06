@@ -256,7 +256,7 @@ def main():
         vocab_size=vocab_size,
         d_model=128,
         nhead=4,
-        nlayers=10,
+        nlayers=5,
         dim_feedforward=256,
         max_len=args.seq_len,
     )
