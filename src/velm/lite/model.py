@@ -128,7 +128,7 @@ class VelmFull(nn.Module):
         self.train()
         if not generated_blocks:
             return prompt
-        return torch.cat(generated_blocks, dim=1)
+        return torch.cat([prompt] + generated_blocks, dim=1)
 
     @property
     def adapter(self):
