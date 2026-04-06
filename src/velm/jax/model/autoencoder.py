@@ -56,6 +56,7 @@ class Encoder(eqx.Module):
     chunk_size: int
     hidden_dim: int
     latent_dim: int
+    dynamic_k: bool
 
     def __init__(
         self,
@@ -65,11 +66,13 @@ class Encoder(eqx.Module):
         ffn_intermediate: int,
         *,
         key: jax.Array,
+        dynamic_k: bool = False,
     ) -> None:
         k1, k2, k3, k4, k5 = jax.random.split(key, 5)
         self.chunk_size = chunk_size
         self.hidden_dim = hidden_dim
         self.latent_dim = latent_dim
+        self.dynamic_k = dynamic_k
 
         # position-wise FFN applied to each token embedding
         self.token_ffn = FFN(hidden_dim, ffn_intermediate, key=k1)
@@ -110,6 +113,12 @@ class Encoder(eqx.Module):
             key, drop_key = jax.random.split(key)
             token_mask = jax.random.bernoulli(drop_key, 0.9, shape=(k, 1))
             h = h * token_mask
+
+        # OPTIONAL EXTENSION HOOK: Adaptive K Routing
+        # If dynamic_k is enabled, we could insert a tiny router here
+        # to determine effective chunk size before flattening.
+        # Currently unimplemented placeholder to allow future integration
+        # without breaking the base encoder API.
 
         # 3. flatten K×d → d
         h_flat = h.reshape(-1)  # (K*d,)

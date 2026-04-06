@@ -132,11 +132,55 @@ def get_tiny_stories(block_size=4, data_dir="data"):
     return train_data, val_data, vocab_size, stoi, itos
 
 
+def get_synthetic_reasoning(block_size=4, data_dir="data"):
+    """Synthetic Reasoning — small toy dataset to demonstrate CoT and CIB.
+
+    Generates synthetic traces of math and logic problems.
+    Example: 'Q: 2+2 A: Let us think. 2 and 2 makes 4. Thus 4.'
+    """
+    os.makedirs(data_dir, exist_ok=True)
+    path = os.path.join(data_dir, "synthetic_reasoning.txt")
+
+    if not os.path.exists(path):
+        import random
+        random.seed(42)
+        with open(path, "w") as f:
+            for _ in range(5000):
+                a = random.randint(1, 20)
+                b = random.randint(1, 20)
+                c = a + b
+                f.write(f"Q: What is {a} plus {b}? A: Let us think step by step. We start with {a}. We add {b}. The sum is {c}. Thus, {c}.\n")
+
+                x = random.randint(1, 10)
+                y = random.randint(1, 10)
+                z = x * y
+                f.write(f"Q: What is {x} times {y}? A: Let us think step by step. We have {x} groups of {y}. Multiplying gives {z}. Thus, {z}.\n")
+
+    with open(path, "r") as f:
+        data = f.read()
+
+    chars = sorted(list(set(data)))
+    vocab_size = len(chars)
+    stoi = {ch: i for i, ch in enumerate(chars)}
+    itos = {i: ch for i, ch in enumerate(chars)}
+
+    data_idx = [stoi[ch] for ch in data]
+    n = int(0.9 * len(data_idx))
+    train_data = torch.tensor(data_idx[:n], dtype=torch.long)
+    val_data = torch.tensor(data_idx[n:], dtype=torch.long)
+
+    train_data = train_data[: (len(train_data) // block_size) * block_size]
+    val_data = val_data[: (len(val_data) // block_size) * block_size]
+
+    return train_data, val_data, vocab_size, stoi, itos
+
+
 # Registry
 DATASETS = {
     "tiny_shakespeare": get_tiny_shakespeare,
     "shakespeare_full": get_shakespeare_full,
     "tiny_stories": get_tiny_stories,
+    "synthetic_reasoning": get_synthetic_reasoning,
 }
 
 

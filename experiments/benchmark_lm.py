@@ -210,7 +210,7 @@ def main():
     parser.add_argument(
         "--dataset",
         default="tiny_shakespeare",
-        choices=["tiny_shakespeare", "shakespeare_full", "tiny_stories"],
+        choices=["tiny_shakespeare", "shakespeare_full", "tiny_stories", "synthetic_reasoning"],
     )
     parser.add_argument("--out", type=str, default="results/benchmark")
     parser.add_argument("--max_iters", type=int, default=5000)
@@ -265,16 +265,15 @@ def main():
 
     from velm.lite import VelmFull
 
-    # Best hyperparameters found by the tuner:
-    # embed_dim: 32, latent_dim: 40, state_dim: 512, block_size: 1
-    # We will use the tuner's suggested hyperparameters but allow CLI args (like args.block_size)
-    # to override block_size if a user specifically sets it differently, though 1 was best.
+    # Hyperparameters carefully chosen to keep VELM Lite parameter count ~700k
+    # to match the Transformer baseline (712k) and strictly not exceed it.
+    # We use state_dim=160, latent_dim=128, embed_dim=32, which results in 697,388 params.
     vl = VelmFull(
         vocab_size=vocab_size,
         block_size=args.block_size,
         embed_dim=32,
-        latent_dim=40,
-        state_dim=512,
+        latent_dim=128,
+        state_dim=160,
     )
     models["velm_lite"] = vl
     model_info["velm_lite"] = count_params(vl)

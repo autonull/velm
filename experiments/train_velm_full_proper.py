@@ -279,7 +279,7 @@ def main():
     parser.add_argument(
         "--dataset",
         default="tiny_shakespeare",
-        choices=["tiny_shakespeare", "shakespeare_full", "tiny_stories"],
+        choices=["tiny_shakespeare", "shakespeare_full", "tiny_stories", "synthetic_reasoning"],
     )
     parser.add_argument(
         "--phase",
