@@ -292,7 +292,7 @@ def main():
         block_size=args.block_size,
         embed_dim=128,
         latent_dim=128,
-        state_dim=256,
+        state_dim=128,
         num_miras_layers=2,
         num_swa_layers=2,
     )

@@ -1,1 +1,1 @@
-trained_steps=1 time=1.748995065689087 pre_acc=0.0
+trained_steps=1 time=2.6837098598480225 pre_acc=0.0
