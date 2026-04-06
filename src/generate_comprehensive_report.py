@@ -47,10 +47,13 @@ def generate_report(results_dir, out_file="velm_comprehensive_report.png"):
     if os.path.exists(summary_file):
         with open(summary_file, 'r') as f:
             for line in f:
-                for model in ["TRANSFORMER", "VELM_LITE", "VELM_HYBRID"]:
-                    if line.startswith(f"{model} params:"):
+                for model in models:
+                    model_upper = model.upper()
+                    # e.g. TRANSFORMER params: 699713
+                    # e.g. VELM_HYBRID_DEEP params: 1543888 (in summary it might have underscores so replace)
+                    if line.startswith(f"{model_upper} params:") or line.replace('_', '').startswith(f"{model_upper} params:"):
                         params[model.lower()] = int(line.split(':')[1].strip())
-                    if line.startswith(f"{model} Mean Val Latency:"):
+                    elif line.startswith(f"{model_upper} Mean Val Latency:") or line.replace('_', '').startswith(f"{model_upper} Mean Val Latency:"):
                         latencies[model.lower()] = float(line.split(':')[1].split('ms')[0].strip())
 
     fig, axs = plt.subplots(2, 3, figsize=(18, 10))
@@ -59,7 +62,8 @@ def generate_report(results_dir, out_file="velm_comprehensive_report.png"):
     colors = {
         'transformer': '#1f77b4',
         'velmlite': '#ff7f0e',
-        'velmhybrid': '#2ca02c'
+        'velmhybridfast': '#2ca02c',
+        'velmhybriddeep': '#d62728'
     }
 
     for model in models:

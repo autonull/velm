@@ -120,7 +120,7 @@ def evaluate(model, data, model_name, eval_iters, batch_size, seq_len, block_siz
         X, Y = X.to(device), Y.to(device)
         t0 = time.time()
 
-        if model_name == "velm_lite":
+        if model_name.startswith("velm"):
             states, latents = model(X)
             B, N, _ = states.shape
             states_flat = states.view(B * N, -1)
@@ -263,7 +263,7 @@ def main():
     models["transformer"] = tf
     model_info["transformer"] = count_params(tf)
 
-    from velm.lite import VelmFull
+    from velm.lite import VelmFull, VelmHybrid
 
     vl = VelmFull(
         vocab_size=vocab_size,
@@ -274,6 +274,30 @@ def main():
     )
     models["velm_lite"] = vl
     model_info["velm_lite"] = count_params(vl)
+
+    vh_fast = VelmHybrid(
+        vocab_size=vocab_size,
+        block_size=args.block_size,
+        embed_dim=128,
+        latent_dim=128,
+        state_dim=128,
+        num_miras_layers=1,
+        num_swa_layers=1,
+    )
+    models["velm_hybrid_fast"] = vh_fast
+    model_info["velm_hybrid_fast"] = count_params(vh_fast)
+
+    vh_deep = VelmHybrid(
+        vocab_size=vocab_size,
+        block_size=args.block_size,
+        embed_dim=128,
+        latent_dim=128,
+        state_dim=256,
+        num_miras_layers=2,
+        num_swa_layers=2,
+    )
+    models["velm_hybrid_deep"] = vh_deep
+    model_info["velm_hybrid_deep"] = count_params(vh_deep)
 
     for name, params in model_info.items():
         print(f"  {name}: {params} params")
@@ -353,7 +377,7 @@ def main():
             X, Y = get_batch(train_data, args.batch_size, args.seq_len, args.block_size)
             X, Y = X.to(device), Y.to(device)
 
-            if name == "velm_lite":
+            if name.startswith("velm"):
                 states, latents = model(X)
                 B, N, _ = states.shape
                 states_flat = states.view(B * N, -1)
@@ -394,7 +418,7 @@ def main():
             f"{p}_val_latency",
             f"{p}_throughput",
         ]
-        if name == "velm_lite":
+        if name.startswith("velm"):
             fieldnames.append(f"{p}_cib_norm")
 
     with open(history_path, "w", newline="") as csvfile:
@@ -410,7 +434,7 @@ def main():
                     row[f"{p}_val_loss"] = results[name]["val_loss"][i]
                     row[f"{p}_val_acc"] = results[name]["val_acc"][i]
                     row[f"{p}_val_latency"] = results[name]["val_latency"][i]
-                    if name == "velm_lite" and i < len(results[name]["cib_norm"]):
+                    if name.startswith("velm") and i < len(results[name]["cib_norm"]):
                         row[f"{p}_cib_norm"] = results[name]["cib_norm"][i]
                 if i > 0 and (i - 1) < len(results[name]["throughput"]):
                     row[f"{p}_throughput"] = results[name]["throughput"][i - 1]
