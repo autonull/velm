@@ -85,7 +85,9 @@ class MirasMemoryLayer(nn.Module):
             eta = self._compute_eta(x_t) # (B, dim)
             alpha = self._compute_alpha(x_t)
 
-            # state: (B, dim, dim) - batched matrix multiply
+            # Query the memory state with q_t
+            q_t = q[:, t, :]
+
             # memory_pred = state @ k_t
             memory_pred = torch.bmm(state, k_t.unsqueeze(2)).squeeze(2) # (B, dim)
 
@@ -96,8 +98,8 @@ class MirasMemoryLayer(nn.Module):
             new_state = alpha.unsqueeze(2) * state - eta.unsqueeze(2) * grad
             new_state = torch.clamp(new_state, -10.0, 10.0)
 
-            # readout: new_state @ k_t
-            out_t = torch.bmm(new_state, k_t.unsqueeze(2)).squeeze(2)
+            # readout: new_state @ q_t
+            out_t = torch.bmm(new_state, q_t.unsqueeze(2)).squeeze(2)
             outputs.append(out_t.unsqueeze(1))
             state = new_state
 
