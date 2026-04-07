@@ -109,10 +109,24 @@ class VelmHybrid(nn.Module):
 
         # Adaptive K sequence chunking: allow sequences not divisible by block_size
         latents = []
-        for start_idx in range(0, L, K):
+        k_logits_list = [] if return_cib_loss else None
+
+        start_idx = 0
+        while start_idx < L:
+            # We predict the chunk size dynamically up to block_size.
+            # In an actual autoregressive decoding loop, this allows the model
+            # to choose how many tokens to process at once.
             chunk = history[:, start_idx:start_idx+K]
-            lat = self.encoder(chunk)
+            if return_cib_loss:
+                lat, k_logits = self.encoder(chunk, return_k_logits=True)
+                k_logits_list.append(k_logits.unsqueeze(1))
+                # For training purposes in proxy, we process fixed chunks and predict K.
+                # In full usage, K = k_logits.argmax(dim=-1).item()
+            else:
+                lat = self.encoder(chunk)
+
             latents.append(lat.unsqueeze(1))
+            start_idx += K
 
         latents = torch.cat(latents, dim=1) # (B, n_blocks, latent)
 
@@ -133,8 +147,10 @@ class VelmHybrid(nn.Module):
             x = self.adapter(x)
 
         if return_cib_loss:
+            # Conditional Information Bottleneck (CIB) heuristic loss
             cib_loss = latents.norm(p=2, dim=2).mean()
-            return x, latents, cib_loss
+            k_logits_tensor = torch.cat(k_logits_list, dim=1) if k_logits_list else None
+            return x, latents, cib_loss, k_logits_tensor
 
         return x, latents
 
@@ -199,10 +215,18 @@ class VelmFull(nn.Module):
 
         # Adaptive K sequence chunking: allow sequences not divisible by block_size
         latents = []
-        for start_idx in range(0, L, K):
+        k_logits_list = [] if return_cib_loss else None
+
+        start_idx = 0
+        while start_idx < L:
             chunk = history[:, start_idx:start_idx+K]
-            lat = self.encoder(chunk)
+            if return_cib_loss:
+                lat, k_logits = self.encoder(chunk, return_k_logits=True)
+                k_logits_list.append(k_logits.unsqueeze(1))
+            else:
+                lat = self.encoder(chunk)
             latents.append(lat.unsqueeze(1))
+            start_idx += K
 
         latents = torch.cat(latents, dim=1)  # (B, n_blocks, latent)
 
@@ -213,7 +237,8 @@ class VelmFull(nn.Module):
             # Enforce that the latent norm is bounded (pruning cognitive bloat)
             # This is a structural penalty to compress continuous vectors
             cib_loss = latents.norm(p=2, dim=2).mean()
-            return states, latents, cib_loss
+            k_logits_tensor = torch.cat(k_logits_list, dim=1) if k_logits_list else None
+            return states, latents, cib_loss, k_logits_tensor
 
         return states, latents
 

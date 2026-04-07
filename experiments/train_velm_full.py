@@ -254,27 +254,110 @@ def main():
         print(f"Sweep results saved to {csv_path}")
 
     elif args.eggroll:
-        print("Running EGGROLL ES tuning...")
-        es = Eggroll(sigma=2e-2)
+        print("Running EGGROLL ES tuning (Multi-Island GEA with Diversity Bonus)...")
+        import copy
 
-        def fitness(m):
-            # fitness is accuracy on a held-out small eval batch
-            return eval_accuracy(m, train_x, train_gaps, device, n_eval=128)
+        num_islands = max(1, args.pop // 4)
+        islands = [copy.deepcopy(model) for _ in range(num_islands)]
+        es_instances = [Eggroll(sigma=2e-2) for _ in range(num_islands)]
 
-        success = es.run_es(
-            model,
-            fitness,
-            pop_size=args.pop,
-            generations=args.gens,
-            sigma=2e-2,
-            lr=0.1,
-            device=device,
-            num_workers=args.workers,
-            evolve=args.evolve,
-            algorithm=args.alg,
-            use_processes=args.process,
-        )
-        print("EGGROLL completed:", success)
+        # We need a shared reference pool for computing diversity bonus
+        # Store latest evaluated state dict vectors.
+        # This will be updated by fitness functions.
+        shared_vectors = []
+
+        def get_model_vector(m):
+            vecs = []
+            for p in m.parameters():
+                if p.requires_grad:
+                    vecs.append(p.detach().reshape(-1))
+            return torch.cat(vecs)
+
+        def create_fitness_fn(island_idx):
+            def fitness(m):
+                # 1. Base Fitness (Accuracy)
+                acc = eval_accuracy(m, train_x, train_gaps, device, n_eval=128)
+
+                # 2. Generalization Bonus (Synthetic Reasoning)
+                # For this proxy, we evaluate on a slightly larger gap to encourage robust reasoning
+                train_x_hard, train_gaps_hard = generate_dataset(128, seq_len, vocab, max_gap=16)
+                acc_gen = eval_accuracy(m, train_x_hard, train_gaps_hard, device, n_eval=128)
+
+                # 3. CIB Compression / Structural Penalty
+                # Lower norm is better, but accuracy should be high.
+                _, latents = m(train_x[:32].to(device))
+                cib_norm = latents.norm(p=2, dim=2).mean().item()
+                compression_bonus = 1.0 / (1.0 + cib_norm)
+
+                # 4. Diversity Bonus (Pairwise Cosine distance)
+                # Compare this model's parameters to the running shared history pool
+                div_bonus = 0.0
+                if len(shared_vectors) > 0:
+                    vec = get_model_vector(m).cpu()
+                    # Sample up to 5 random vectors from history
+                    sample_size = min(5, len(shared_vectors))
+                    indices = np.random.choice(len(shared_vectors), sample_size, replace=False)
+                    dists = []
+                    for idx in indices:
+                        other_vec = shared_vectors[idx]
+                        if vec.shape == other_vec.shape:
+                            cos_sim = F.cosine_similarity(vec.unsqueeze(0), other_vec.unsqueeze(0)).item()
+                            # 1 - cos_sim -> 0 if same, 2 if opposite.
+                            dists.append(1.0 - cos_sim)
+                    if dists:
+                        div_bonus = np.mean(dists)
+
+                # Add this model's vector to the shared pool (with simple reservoir sampling to prevent memory blowout)
+                if len(shared_vectors) < 100:
+                    shared_vectors.append(get_model_vector(m).cpu())
+                elif np.random.rand() < 0.1:
+                    shared_vectors[np.random.randint(0, 100)] = get_model_vector(m).cpu()
+
+                # GEA 2.0 fitness
+                return (acc * 0.5 + acc_gen * 0.5) * compression_bonus + 0.1 * div_bonus
+            return fitness
+
+        # Multi-Island Evolution Loop
+        generations_per_migration = max(1, args.gens // 3)
+        num_migrations = max(1, args.gens // generations_per_migration)
+
+        for mig_idx in range(num_migrations):
+            print(f"Migration epoch {mig_idx+1}/{num_migrations}")
+            for island_idx in range(num_islands):
+                es_instances[island_idx].run_es(
+                    islands[island_idx],
+                    create_fitness_fn(island_idx),
+                    pop_size=max(2, args.pop // num_islands),
+                    generations=generations_per_migration,
+                    sigma=2e-2,
+                    lr=0.1,
+                    device=device,
+                    num_workers=args.workers,
+                    evolve=args.evolve,
+                    algorithm=args.alg,
+                    use_processes=args.process,
+                )
+
+            # Experience Migration:
+            # Find the best performing island and share its weights with the worst
+            island_fitnesses = []
+            for i in range(num_islands):
+                f_fn = create_fitness_fn(i)
+                island_fitnesses.append(f_fn(islands[i]))
+
+            best_island_idx = np.argmax(island_fitnesses)
+            worst_island_idx = np.argmin(island_fitnesses)
+
+            if best_island_idx != worst_island_idx:
+                print(f"  Migrating experience from Island {best_island_idx} to Island {worst_island_idx}")
+                islands[worst_island_idx].load_state_dict(islands[best_island_idx].state_dict())
+
+        # Select the globally best model after all migrations
+        final_fitnesses = [create_fitness_fn(i)(islands[i]) for i in range(num_islands)]
+        best_island = islands[np.argmax(final_fitnesses)]
+        model.load_state_dict(best_island.state_dict())
+
+        print("EGGROLL completed (Multi-Island GEA)")
         acc_post = eval_accuracy(model, train_x, train_gaps, device, n_eval=256)
         with open(os.path.join(args.out, "eggroll_result.txt"), "w") as f:
             f.write(f"eggroll_post_acc={acc_post}\n")

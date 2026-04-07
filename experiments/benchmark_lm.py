@@ -381,7 +381,9 @@ def main():
             X, Y = X.to(device), Y.to(device)
 
             if name.startswith("velm"):
-                states, latents, cib_loss = model(X, return_cib_loss=True)
+                out = model(X, return_cib_loss=True)
+                states, latents, cib_loss = out[0], out[1], out[2]
+                k_logits = out[3] if len(out) > 3 else None
                 B, N, _ = states.shape
                 states_flat = states.view(B * N, -1)
                 # Ensure the decoder truncates block output appropriately for the exact sequence length

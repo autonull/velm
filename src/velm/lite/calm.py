@@ -24,7 +24,15 @@ class CALMEncoder(nn.Module):
         # Use SwiGLU for enhanced representation efficiency
         self.proj = SwiGLU(embed_dim * block_size, latent_dim * 2, latent_dim)
 
-    def forward(self, tokens):
+        # Adaptive K Router: Predicts the optimal chunk size K (1 to block_size)
+        # based on the current context vector.
+        self.k_router = nn.Sequential(
+            nn.Linear(latent_dim, latent_dim),
+            nn.ReLU(),
+            nn.Linear(latent_dim, block_size) # Outputs logits for K in [1, block_size]
+        )
+
+    def forward(self, tokens, return_k_logits=False):
         # tokens: (B, K)
         B, K = tokens.shape
         emb = self.embed(tokens)  # (B, K, E)
@@ -40,6 +48,11 @@ class CALMEncoder(nn.Module):
 
         flat = emb.view(B, self.block_size * emb.size(-1)) # (B, max_K*E)
         lat = self.proj(flat)     # (B, latent)
+
+        if return_k_logits:
+            k_logits = self.k_router(lat.detach())
+            return lat, k_logits
+
         return lat
 
 class ResidualBlock(nn.Module):
