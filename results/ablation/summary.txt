@@ -1,0 +1,23 @@
+Dataset: tiny_shakespeare
+Vocab size: 65
+
+VELM_LITE params: 626848
+VELM_LITE Final Val Loss: 1.8491
+VELM_LITE Final Val Acc: 0.5541
+VELM_LITE Mean Val Latency: 7.80 ms
+VELM_LITE Mean Throughput: 13522.54 tok/s
+VELM_LITE Final CIB Norm: 6.3641
+
+VELM_NO_THOUGHTS params: 571456
+VELM_NO_THOUGHTS Final Val Loss: 1.9154
+VELM_NO_THOUGHTS Final Val Acc: 0.5365
+VELM_NO_THOUGHTS Mean Val Latency: 7.14 ms
+VELM_NO_THOUGHTS Mean Throughput: 14873.93 tok/s
+VELM_NO_THOUGHTS Final CIB Norm: 6.1393
+
+VELM_NO_CIB params: 626848
+VELM_NO_CIB Final Val Loss: 1.8593
+VELM_NO_CIB Final Val Acc: 0.5404
+VELM_NO_CIB Mean Val Latency: 7.37 ms
+VELM_NO_CIB Mean Throughput: 14385.89 tok/s
+VELM_NO_CIB Final CIB Norm: 6.0849

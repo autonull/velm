@@ -1,0 +1,29 @@
+Dataset: tiny_stories
+Vocab size: 92
+
+TRANSFORMER params: 706652
+TRANSFORMER Final Val Loss: 2.5159
+TRANSFORMER Final Val Acc: 0.3041
+TRANSFORMER Mean Val Latency: 8.08 ms
+TRANSFORMER Mean Throughput: 10438.78 tok/s
+
+VELM_LITE params: 640780
+VELM_LITE Final Val Loss: 1.5643
+VELM_LITE Final Val Acc: 0.6182
+VELM_LITE Mean Val Latency: 7.53 ms
+VELM_LITE Mean Throughput: 13775.51 tok/s
+VELM_LITE Final CIB Norm: 6.6626
+
+VELM_HYBRID_FAST params: 740018
+VELM_HYBRID_FAST Final Val Loss: 3.1412
+VELM_HYBRID_FAST Final Val Acc: 0.1859
+VELM_HYBRID_FAST Mean Val Latency: 18.14 ms
+VELM_HYBRID_FAST Mean Throughput: 5876.65 tok/s
+VELM_HYBRID_FAST Final CIB Norm: 3.7669
+
+VELM_HYBRID_DEEP params: 729996
+VELM_HYBRID_DEEP Final Val Loss: 3.1232
+VELM_HYBRID_DEEP Final Val Acc: 0.2062
+VELM_HYBRID_DEEP Mean Val Latency: 19.53 ms
+VELM_HYBRID_DEEP Mean Throughput: 5438.44 tok/s
+VELM_HYBRID_DEEP Final CIB Norm: 2.3346
