@@ -273,7 +273,8 @@ def main():
         block_size=args.block_size,
         embed_dim=128,
         latent_dim=128,
-        state_dim=128,
+        state_dim=96, # Reduced from 128 to match Transformer parameter budget (699k vs 661k) and divisible by 32
+        num_latent_thoughts=1,
     )
     models["velm_lite"] = vl
     model_info["velm_lite"] = count_params(vl)

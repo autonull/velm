@@ -160,14 +160,15 @@ class VelmHybrid(nn.Module):
 class VelmCore(nn.Module):
     """Core VELM sequential backbone.
 
-    Flow: continuous latents -> Miras memory -> optional SWA -> optional adapter
+    Flow: continuous latents -> Miras memory -> optional SWA -> optional latent thoughts -> optional adapter
     This isolates the continuous sequence modeling from the specific input/output modalities.
     """
-    def __init__(self, latent_dim=64, state_dim=128, use_swa=True):
+    def __init__(self, latent_dim=64, state_dim=128, use_swa=True, num_latent_thoughts=0):
         super().__init__()
         self.latent_dim = latent_dim
         self.state_dim = state_dim
         self.use_swa = use_swa
+        self.num_latent_thoughts = num_latent_thoughts
 
         self.latent_norm = RMSNorm(latent_dim)
         from .miras import MirasMemory
@@ -176,6 +177,10 @@ class VelmCore(nn.Module):
         if self.use_swa:
             self.swa_norm = RMSNorm(state_dim)
             self.swa = SWALayer(dim=state_dim, num_heads=max(1, state_dim // 32), window_size=32)
+
+        if self.num_latent_thoughts > 0:
+            self.thought_norm = RMSNorm(state_dim)
+            self.thought_ffn = SwiGLUFFN(state_dim, state_dim * 2)
 
         self.adapter = Adapter(state_dim, bottleneck=max(8, state_dim//4))
 
@@ -190,6 +195,13 @@ class VelmCore(nn.Module):
             norm_states = self.swa_norm(states)
             states = states + self.swa(norm_states)
 
+        # Latent thoughts (continuous unconstrained vectors)
+        if self.num_latent_thoughts > 0:
+            for _ in range(self.num_latent_thoughts):
+                norm_states = self.thought_norm(states)
+                thought = self.thought_ffn(norm_states)
+                states = states + thought
+
         # optionally apply adapter to all states (qTTT)
         if use_adapter:
             states = self.adapter(states)
@@ -200,12 +212,12 @@ class VelmFull(nn.Module):
 
     Flow: tokens -> CALM encoder (blocks) -> VelmCore -> decoder
     """
-    def __init__(self, vocab_size, block_size=4, embed_dim=64, latent_dim=64, state_dim=128):
+    def __init__(self, vocab_size, block_size=4, embed_dim=64, latent_dim=64, state_dim=128, num_latent_thoughts=0):
         super().__init__()
         self.vocab_size = vocab_size
         self.block_size = block_size
         self.encoder = CALMEncoder(vocab_size, block_size=block_size, embed_dim=embed_dim, latent_dim=latent_dim)
-        self.core = VelmCore(latent_dim=latent_dim, state_dim=state_dim)
+        self.core = VelmCore(latent_dim=latent_dim, state_dim=state_dim, num_latent_thoughts=num_latent_thoughts)
         self.decoder = CALMDecoder(latent_dim=state_dim, hidden=state_dim, vocab_size=vocab_size, block_size=block_size)
 
     def forward(self, history, use_adapter=False, return_cib_loss=False):
