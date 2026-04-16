@@ -43,6 +43,7 @@ class VELM(eqx.Module):
     backbone: VELMBackbone
     head: EnergyHead
     chunk_size: int
+    enable_cib_loss: bool
 
     def __init__(
         self,
@@ -50,6 +51,8 @@ class VELM(eqx.Module):
         vocab_size: int = QWEN35_VOCAB_SIZE,
         ae_hidden_dim: int | None = None,
         ae_ffn_intermediate: int | None = None,
+        enable_dynamic_k: bool = False,
+        enable_cib_loss: bool = False,
         *,
         key: jax.Array,
     ) -> None:
@@ -70,6 +73,8 @@ class VELM(eqx.Module):
         _ae_hdim = ae_hidden_dim or cfg.get("ae_hidden_dim", 512)
         _ae_ffn = ae_ffn_intermediate or cfg.get("ae_ffn_intermediate", 1024)
 
+        self.enable_cib_loss = enable_cib_loss
+
         self.autoencoder = CALMAutoencoder(
             vocab_size=vocab_size,
             chunk_size=cfg["chunk_size_k"],
@@ -77,6 +82,13 @@ class VELM(eqx.Module):
             latent_dim=cfg["latent_dim"],
             ffn_intermediate=_ae_ffn,
             key=k1,
+            # Pass dynamic_k configuration to autoencoder
+        )
+        # We manually set dynamic_k since it's an extension point in Encoder
+        self.autoencoder = eqx.tree_at(
+            lambda ae: ae.encoder.dynamic_k,
+            self.autoencoder,
+            enable_dynamic_k
         )
 
         self.backbone = VELMBackbone(
@@ -176,9 +188,20 @@ class VELM(eqx.Module):
         losses = jax.vmap(position_loss)(h_input, z_target, keys)
         mean_loss = jnp.mean(losses)
 
+        # OPTIONAL EXTENSION HOOK: CIB Regularization on Latents
+        # If enabled, add structural compression loss to continuous representations.
+        cib_loss = 0.0
+        if self.enable_cib_loss:
+            # Placeholder for actual conditional information bottleneck loss computation
+            # L_CIB = I(X;Z) - μ I(Y;Z|X)
+            # which could be approximated by latent magnitude or other prior constraints.
+            cib_loss = 1e-4 * jnp.mean(jnp.linalg.norm(h_input, axis=-1))
+            mean_loss = mean_loss + cib_loss
+
         metrics = {
             "energy_loss": mean_loss,
             "num_positions": jnp.array(num_positions, dtype=jnp.float32),
+            "cib_loss": jnp.array(cib_loss, dtype=jnp.float32),
         }
         return mean_loss, metrics
 
