@@ -192,22 +192,33 @@ def train_backbone_eggroll(
             [train_data[s : s + seq_len].reshape(n_chunks, chunk_size) for s in starts]
         )
 
-        def fitness_fn(p):
+        # We must JIT compile the entire eggroll step to prevent jax.lax.map from
+        # hanging or running extremely slowly. We also JIT compile the fitness
+        # calculation to vectorize sequence batches rather than python looping.
+        # DO NOT JIT THE ENTIRE EGGROLL STEP, IT IS TOO SLOW ON CPU AND CAUSES COMPILATION TIMEOUTS
+        # INSTEAD JIT THE FITNESS EVALUATION ALONE
+        @eqx.filter_jit
+        def compiled_fitness_fn(p, seqs, s_key):
             model = eqx.combine(p, static)
-            total = 0.0
-            for b in range(sequences.shape[0]):
-                seq_loss, _ = model.training_loss(
-                    sequences[b],
-                    key=jax.random.fold_in(step_key, b),
+            def single_seq_loss(seq, batch_idx):
+                loss, _ = model.training_loss(
+                    seq,
+                    key=jax.random.fold_in(s_key, batch_idx),
                     num_samples=num_samples,
                     n_pos=n_pos,
                 )
-                total = total + seq_loss
-            return -(total / sequences.shape[0])
+                return loss
+
+            batch_indices = jnp.arange(seqs.shape[0])
+            losses = jax.vmap(single_seq_loss)(seqs, batch_indices)
+            return -jnp.mean(losses)
+
+        def fitness_wrapper(p):
+            return compiled_fitness_fn(p, sequences, step_key)
 
         new_params, new_state, metrics = eggroll_step(
             params,
-            fitness_fn,
+            fitness_wrapper,
             opt,
             opt_state,
             key=step_key,
@@ -411,9 +422,9 @@ def main():
                 # 4. energy loss: predict z_{i+1} from h_i
                 h_input = hidden_states[:-1]
                 z_target = target_z[1:]
-                if n_pos is None:
-                    n_pos = int(h_input.shape[0])
-                keys = jax.random.split(key, n_pos)
+
+                # Dynamic shape tracking requires jax dynamic slicing instead of hardcoding python int arrays
+                keys = jax.random.split(key, h_input.shape[0])
 
                 def position_loss(h, target, k):
                     samples = self.head(h, key=k, num_samples=num_samples)
@@ -425,7 +436,7 @@ def main():
                 mean_loss = jnp.mean(losses)
                 return mean_loss, {
                     "energy_loss": mean_loss,
-                    "num_positions": jnp.array(n_pos, dtype=jnp.float32),
+                    "num_positions": jnp.array(h_input.shape[0], dtype=jnp.float32),
                 }
 
         velm = _VELM(autoencoder=ae, backbone=backbone, head=head, chunk_size=4)

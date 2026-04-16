@@ -265,12 +265,16 @@ def main():
 
     from velm.lite import VelmFull
 
+    # Best hyperparameters found by the tuner:
+    # embed_dim: 32, latent_dim: 40, state_dim: 512, block_size: 1
+    # We will use the tuner's suggested hyperparameters but allow CLI args (like args.block_size)
+    # to override block_size if a user specifically sets it differently, though 1 was best.
     vl = VelmFull(
         vocab_size=vocab_size,
         block_size=args.block_size,
-        embed_dim=128,
-        latent_dim=128,
-        state_dim=128,
+        embed_dim=32,
+        latent_dim=40,
+        state_dim=512,
     )
     models["velm_lite"] = vl
     model_info["velm_lite"] = count_params(vl)
@@ -393,6 +397,8 @@ def main():
             f"{p}_val_acc",
             f"{p}_val_latency",
             f"{p}_throughput",
+            f"{p}_iteration_time",
+            f"{p}_params",
         ]
         if name == "velm_lite":
             fieldnames.append(f"{p}_cib_norm")
@@ -414,8 +420,15 @@ def main():
                         row[f"{p}_cib_norm"] = results[name]["cib_norm"][i]
                 if i > 0 and (i - 1) < len(results[name]["throughput"]):
                     row[f"{p}_throughput"] = results[name]["throughput"][i - 1]
+                    # Since throughput is tok/s, and throughput = steps_per_sec * batch * seq_len
+                    # and steps_per_sec = eval_interval / time_for_interval
+                    # iteration_time = time_for_interval / eval_interval = 1 / steps_per_sec
+                    # so iteration_time = (batch * seq_len) / throughput
+                    row[f"{p}_iteration_time"] = (args.batch_size * args.seq_len) / results[name]["throughput"][i - 1] if results[name]["throughput"][i - 1] > 0 else 0.0
                 else:
                     row[f"{p}_throughput"] = 0.0
+                    row[f"{p}_iteration_time"] = 0.0
+                row[f"{p}_params"] = model_info[name]
             writer.writerow(row)
     print(f"History saved to {history_path}")
 
