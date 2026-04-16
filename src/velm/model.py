@@ -2,24 +2,36 @@ import torch
 import torch.nn as nn
 from .calm import CALMEncoder, CALMDecoder
 from .miras import MirasMemory
+from .swa import SWALayer
 from .qttt import Adapter
 
 class VelmCore(nn.Module):
     """Core VELM sequential backbone.
 
-    Flow: continuous latents -> Miras memory -> optional adapter
+    Flow: continuous latents -> Miras memory -> optional SWA -> optional adapter
     This isolates the continuous sequence modeling from the specific input/output modalities.
     """
-    def __init__(self, latent_dim=64, state_dim=128):
+    def __init__(self, latent_dim=64, state_dim=128, use_swa=True):
         super().__init__()
         self.latent_dim = latent_dim
         self.state_dim = state_dim
+        self.use_swa = use_swa
+
         self.memory = MirasMemory(key_dim=latent_dim, state_dim=state_dim)
+        if self.use_swa:
+            self.swa = SWALayer(dim=state_dim, num_heads=max(1, state_dim // 32), window_size=32)
+
         self.adapter = Adapter(state_dim, bottleneck=max(8, state_dim//4))
 
     def forward(self, latents, use_adapter=False):
         # latents: (B, n_blocks, latent_dim)
         states = self.memory(latents)        # (B, n_blocks, state_dim)
+
+        # Hybrid configuration: SWA provides local context, Miras provides long-range state
+        if self.use_swa:
+            # Residual connection around SWA for stability
+            states = states + self.swa(states)
+
         # optionally apply adapter to all states (qTTT)
         if use_adapter:
             states = self.adapter(states)

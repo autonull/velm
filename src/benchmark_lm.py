@@ -115,11 +115,13 @@ def estimate_loss(model, data, model_name, eval_iters, batch_size, seq_len, bloc
     losses = []
     accs = []
     cib_norms = []
+    latencies = []
 
     for _ in range(eval_iters):
         X, Y = get_batch(data, batch_size, seq_len, block_size)
         X, Y = X.to(device), Y.to(device)
 
+        t0 = time.time()
         if model_name == 'velm':
             # VELM is autoregressive across blocks. We want to predict the NEXT block.
             # So state i should predict block i+1.
@@ -172,13 +174,16 @@ def estimate_loss(model, data, model_name, eval_iters, batch_size, seq_len, bloc
             preds = logits_flat.argmax(dim=-1)
             acc = (preds == targets).float().mean().item()
 
+        t1 = time.time()
+        latencies.append(t1 - t0)
+
         losses.append(loss.item())
         accs.append(acc)
 
     model.train()
     if model_name == 'velm':
-        return np.mean(losses), np.mean(accs), np.mean(cib_norms)
-    return np.mean(losses), np.mean(accs), None
+        return np.mean(losses), np.mean(accs), np.mean(cib_norms), np.mean(latencies)
+    return np.mean(losses), np.mean(accs), None, np.mean(latencies)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -202,13 +207,12 @@ def main():
     train_data, val_data, vocab_size, stoi, itos = get_tiny_shakespeare(args.block_size)
     print(f"Vocab size: {vocab_size}, Train size: {len(train_data)}, Val size: {len(val_data)}")
 
-    # Instantiate VELM scaled up to match Transformer
-    velm = VelmFull(vocab_size=vocab_size, block_size=args.block_size, embed_dim=128, latent_dim=128, state_dim=192)
+    # Instantiate VELM scaled to be highly compact
+    velm = VelmFull(vocab_size=vocab_size, block_size=args.block_size, embed_dim=128, latent_dim=128, state_dim=128)
     velm_params = count_params(velm)
 
-    # Instantiate Transformer with roughly similar params
-    # ~ Velm = 128*64 + 64*128*2 + ... ~ small.
-    transformer = TransformerLM(vocab_size=vocab_size, d_model=128, nhead=4, nlayers=2, dim_feedforward=256, max_len=args.seq_len)
+    # Instantiate Transformer with strictly matched parameter count
+    transformer = TransformerLM(vocab_size=vocab_size, d_model=128, nhead=4, nlayers=3, dim_feedforward=256, max_len=args.seq_len)
     tf_params = count_params(transformer)
 
     print(f"VELM params: {velm_params}")
@@ -219,34 +223,41 @@ def main():
         'velm': velm
     }
 
-    results = {'velm': {'train_loss':[], 'val_loss':[], 'val_acc':[], 'cib_norm':[]},
-               'transformer': {'train_loss':[], 'val_loss':[], 'val_acc':[]}}
+    results = {'velm': {'train_loss':[], 'val_loss':[], 'val_acc':[], 'cib_norm':[], 'val_latency':[], 'throughput':[]},
+               'transformer': {'train_loss':[], 'val_loss':[], 'val_acc':[], 'val_latency':[], 'throughput':[]}}
 
     for name, model in models.items():
         print(f"\\n--- Training {name.upper()} ---")
         model.to(device)
         optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+
         t0 = time.time()
         t_start_step = time.time()
         for iter_num in range(args.max_iters):
             if iter_num % args.eval_interval == 0 or iter_num == args.max_iters - 1:
-                train_loss, train_acc, cib_norm = estimate_loss(model, train_data, name, args.eval_iters, args.batch_size, args.seq_len, args.block_size, device)
-                val_loss, val_acc, val_cib_norm = estimate_loss(model, val_data, name, args.eval_iters, args.batch_size, args.seq_len, args.block_size, device)
+                train_loss, train_acc, cib_norm, train_lat = estimate_loss(model, train_data, name, args.eval_iters, args.batch_size, args.seq_len, args.block_size, device)
+                val_loss, val_acc, val_cib_norm, val_lat = estimate_loss(model, val_data, name, args.eval_iters, args.batch_size, args.seq_len, args.block_size, device)
 
                 results[name]['train_loss'].append(train_loss)
                 results[name]['val_loss'].append(val_loss)
                 results[name]['val_acc'].append(val_acc)
+                results[name]['val_latency'].append(val_lat)
                 if cib_norm is not None:
                     results[name]['cib_norm'].append(val_cib_norm)
 
                 t_end_step = time.time()
                 steps_per_sec = args.eval_interval / (t_end_step - t_start_step) if iter_num > 0 else 0
+                throughput = steps_per_sec * args.batch_size * args.seq_len
+                if iter_num > 0:
+                    results[name]['throughput'].append(throughput)
                 t_start_step = time.time()
 
                 print(f"Step {iter_num}: Train Loss {train_loss:.4f}, Val Loss {val_loss:.4f}, Val Acc {val_acc:.4f}" +
                       (f", CIB Norm {val_cib_norm:.4f}" if cib_norm is not None else "") +
-                      (f", Speed {steps_per_sec:.2f} steps/s" if iter_num > 0 else ""))
+                      (f", Speed {steps_per_sec:.2f} steps/s, Throughput {throughput:.2f} tokens/s" if iter_num > 0 else ""))
 
             X, Y = get_batch(train_data, args.batch_size, args.seq_len, args.block_size)
             X, Y = X.to(device), Y.to(device)
@@ -280,43 +291,76 @@ def main():
             optimizer.step()
 
         t1 = time.time()
+
+        peak_memory = 0
+        if torch.cuda.is_available():
+            peak_memory = torch.cuda.max_memory_allocated() / (1024 ** 2)
+        results[name]['peak_memory'] = peak_memory
+
         print(f"{name.upper()} Training Time: {t1-t0:.2f}s")
+        if peak_memory > 0:
+            print(f"{name.upper()} Peak Memory: {peak_memory:.2f} MB")
 
-    # Plotting
+    # Plotting: Composite Chart
+    fig, axs = plt.subplots(3, 2, figsize=(15, 12))
+    fig.suptitle('VELM vs Vanilla Transformer Benchmarking', fontsize=16)
 
-    # 1. Loss Comparison
-    plt.figure()
+    steps = np.arange(len(results['transformer']['train_loss'])) * args.eval_interval
+
+    # Plot 1: Train Loss
     for name in models:
-        plt.plot(np.arange(len(results[name]['train_loss'])) * args.eval_interval, results[name]['train_loss'], '--', label=f"{name} train loss", alpha=0.7)
-        plt.plot(np.arange(len(results[name]['val_loss'])) * args.eval_interval, results[name]['val_loss'], label=f"{name} val loss")
-    plt.xlabel("Step")
-    plt.ylabel("Loss")
-    plt.title("Train/Val Loss Comparison")
-    plt.legend()
-    plt.savefig(os.path.join(args.out, "loss_comparison.png"))
-    plt.close()
+        axs[0, 0].plot(steps, results[name]['train_loss'], label=f"{name.upper()}")
+    axs[0, 0].set_title('Train Loss')
+    axs[0, 0].set_xlabel('Step')
+    axs[0, 0].set_ylabel('Loss')
+    axs[0, 0].legend()
 
-    # 2. Accuracy Comparison
-    plt.figure()
+    # Plot 2: Validation Loss
     for name in models:
-        plt.plot(np.arange(len(results[name]['val_acc'])) * args.eval_interval, results[name]['val_acc'], label=f"{name} val acc")
-    plt.xlabel("Step")
-    plt.ylabel("Accuracy")
-    plt.title("Validation Accuracy Comparison")
-    plt.legend()
-    plt.savefig(os.path.join(args.out, "accuracy_comparison.png"))
-    plt.close()
+        axs[0, 1].plot(steps, results[name]['val_loss'], label=f"{name.upper()}")
+    axs[0, 1].set_title('Validation Loss')
+    axs[0, 1].set_xlabel('Step')
+    axs[0, 1].set_ylabel('Loss')
+    axs[0, 1].legend()
 
-    # 3. CIB Norm (VELM only)
+    # Plot 3: Validation Accuracy
+    for name in models:
+        axs[1, 0].plot(steps, results[name]['val_acc'], label=f"{name.upper()}")
+    axs[1, 0].set_title('Validation Accuracy')
+    axs[1, 0].set_xlabel('Step')
+    axs[1, 0].set_ylabel('Accuracy')
+    axs[1, 0].legend()
+
+    # Plot 4: Validation Latency
+    for name in models:
+        latencies_ms = [l * 1000 for l in results[name]['val_latency']]
+        axs[1, 1].plot(steps, latencies_ms, label=f"{name.upper()}")
+    axs[1, 1].set_title('Validation Inference Latency')
+    axs[1, 1].set_xlabel('Step')
+    axs[1, 1].set_ylabel('Latency (ms)')
+    axs[1, 1].legend()
+
+    # Plot 5: Throughput
+    for name in models:
+        # Throughput array is missing the 0th step, align it
+        t_steps = np.arange(1, len(results[name]['throughput']) + 1) * args.eval_interval
+        axs[2, 0].plot(t_steps, results[name]['throughput'], label=f"{name.upper()}")
+    axs[2, 0].set_title('Training Throughput')
+    axs[2, 0].set_xlabel('Step')
+    axs[2, 0].set_ylabel('Tokens / Sec')
+    axs[2, 0].legend()
+
+    # Plot 6: VELM CIB Norm
     if len(results['velm']['cib_norm']) > 0:
-        plt.figure()
-        plt.plot(np.arange(len(results['velm']['cib_norm'])) * args.eval_interval, results['velm']['cib_norm'], label="VELM CIB norm", color='green')
-        plt.xlabel("Step")
-        plt.ylabel("Norm")
-        plt.title("VELM Continuous Information Bottleneck Norm")
-        plt.legend()
-        plt.savefig(os.path.join(args.out, "cib_norm.png"))
-        plt.close()
+        axs[2, 1].plot(steps, results['velm']['cib_norm'], label="VELM CIB Norm", color='green')
+        axs[2, 1].set_title('Continuous Information Bottleneck Norm')
+        axs[2, 1].set_xlabel('Step')
+        axs[2, 1].set_ylabel('L2 Norm')
+        axs[2, 1].legend()
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(args.out, "composite_results.png"))
+    plt.close()
 
     # --- qTTT (Test-Time Training) Demonstration for VELM ---
     print("\\n--- Running qTTT Adaptation Demonstration on VELM ---")
@@ -361,9 +405,16 @@ def main():
     velm.eval()
     zero_shot_acc = eval_chunk(velm, query_x, query_y)
 
-    # 2. Adapt only the adapter weights on the support chunk
-    adapter_params = [p for n, p in velm.named_parameters() if 'adapter' in n]
-    qttt_opt = torch.optim.AdamW(adapter_params, lr=1e-2)
+    # 2. Adapt adapter weights and SWA q_proj weights on the support chunk
+    qttt_params = []
+    for n, p in velm.named_parameters():
+        if 'adapter' in n:
+            qttt_params.append(p)
+        elif 'swa.q_proj' in n:
+            # Dual-path long context: qTTT adapts SWA query projections
+            qttt_params.append(p)
+
+    qttt_opt = torch.optim.AdamW(qttt_params, lr=1e-2)
 
     velm.train()
     adapt_steps = 25
@@ -399,10 +450,16 @@ def main():
         for name in models:
             f.write(f"{name.upper()} Final Val Loss: {results[name]['val_loss'][-1]:.4f}\\n")
             f.write(f"{name.upper()} Final Val Acc: {results[name]['val_acc'][-1]:.4f}\\n")
+            f.write(f"{name.upper()} Mean Val Latency: {np.mean(results[name]['val_latency']) * 1000:.2f} ms\n")
+            if len(results[name]['throughput']) > 0:
+                f.write(f"{name.upper()} Mean Throughput: {np.mean(results[name]['throughput']):.2f} tokens/s\n")
+            if results[name].get('peak_memory', 0) > 0:
+                f.write(f"{name.upper()} Peak Memory: {results[name]['peak_memory']:.2f} MB\n")
             if name == 'velm':
                 f.write(f"{name.upper()} Final CIB Norm: {results[name]['cib_norm'][-1]:.4f}\\n")
+            f.write("\n")
 
-        f.write(f"\\n--- qTTT Experiment ---\\n")
+        f.write(f"--- qTTT Experiment ---\n")
         f.write(f"Zero-shot Acc: {zero_shot_acc:.4f}\\n")
         f.write(f"Adapted Acc: {adapted_acc:.4f}\\n")
 

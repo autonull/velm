@@ -24,21 +24,31 @@ class CALMEncoder(nn.Module):
         lat = self.proj(flat)     # (B, latent)
         return lat
 
+class ResidualBlock(nn.Module):
+    def __init__(self, dim, hidden):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(dim, hidden),
+            nn.GELU(),
+            nn.Linear(hidden, dim)
+        )
+    def forward(self, x):
+        return x + self.net(x)
+
 class CALMDecoder(nn.Module):
-    """Energy-based style decoder stub: map latent to K tokens logits via MLP."""
-    def __init__(self, latent_dim=64, hidden=128, vocab_size=100, block_size=4):
+    """Energy-based style decoder stub: map latent to K tokens logits via MLP with residual blocks."""
+    def __init__(self, latent_dim=64, hidden=128, vocab_size=100, block_size=4, num_blocks=2):
         super().__init__()
         self.vocab_size = vocab_size
         self.block_size = block_size
-        self.net = nn.Sequential(
-            nn.Linear(latent_dim, hidden),
-            nn.GELU(),
-            nn.Linear(hidden, vocab_size * block_size)
-        )
+
+        self.blocks = nn.Sequential(*[ResidualBlock(latent_dim, hidden) for _ in range(num_blocks)])
+        self.head = nn.Linear(latent_dim, vocab_size * block_size)
 
     def forward(self, latent):
         # latent: (..., latent_dim)
         # out: (..., block_size, vocab_size)
-        out = self.net(latent)
+        h = self.blocks(latent)
+        out = self.head(h)
         shape = list(out.shape[:-1]) + [self.block_size, self.vocab_size]
         return out.view(*shape)
