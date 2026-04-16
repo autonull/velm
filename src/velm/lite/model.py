@@ -109,10 +109,24 @@ class VelmHybrid(nn.Module):
 
         # Adaptive K sequence chunking: allow sequences not divisible by block_size
         latents = []
-        for start_idx in range(0, L, K):
+        k_logits_list = [] if return_cib_loss else None
+
+        start_idx = 0
+        while start_idx < L:
+            # We predict the chunk size dynamically up to block_size.
+            # In an actual autoregressive decoding loop, this allows the model
+            # to choose how many tokens to process at once.
             chunk = history[:, start_idx:start_idx+K]
-            lat = self.encoder(chunk)
+            if return_cib_loss:
+                lat, k_logits = self.encoder(chunk, return_k_logits=True)
+                k_logits_list.append(k_logits.unsqueeze(1))
+                # For training purposes in proxy, we process fixed chunks and predict K.
+                # In full usage, K = k_logits.argmax(dim=-1).item()
+            else:
+                lat = self.encoder(chunk)
+
             latents.append(lat.unsqueeze(1))
+            start_idx += K
 
         latents = torch.cat(latents, dim=1) # (B, n_blocks, latent)
 
@@ -133,8 +147,10 @@ class VelmHybrid(nn.Module):
             x = self.adapter(x)
 
         if return_cib_loss:
+            # Conditional Information Bottleneck (CIB) heuristic loss
             cib_loss = latents.norm(p=2, dim=2).mean()
-            return x, latents, cib_loss
+            k_logits_tensor = torch.cat(k_logits_list, dim=1) if k_logits_list else None
+            return x, latents, cib_loss, k_logits_tensor
 
         return x, latents
 
@@ -144,14 +160,15 @@ class VelmHybrid(nn.Module):
 class VelmCore(nn.Module):
     """Core VELM sequential backbone.
 
-    Flow: continuous latents -> Miras memory -> optional SWA -> optional adapter
+    Flow: continuous latents -> Miras memory -> optional SWA -> optional latent thoughts -> optional adapter
     This isolates the continuous sequence modeling from the specific input/output modalities.
     """
-    def __init__(self, latent_dim=64, state_dim=128, use_swa=True):
+    def __init__(self, latent_dim=64, state_dim=128, use_swa=True, num_latent_thoughts=0):
         super().__init__()
         self.latent_dim = latent_dim
         self.state_dim = state_dim
         self.use_swa = use_swa
+        self.num_latent_thoughts = num_latent_thoughts
 
         self.latent_norm = RMSNorm(latent_dim)
         from .miras import MirasMemory
@@ -160,6 +177,10 @@ class VelmCore(nn.Module):
         if self.use_swa:
             self.swa_norm = RMSNorm(state_dim)
             self.swa = SWALayer(dim=state_dim, num_heads=max(1, state_dim // 32), window_size=32)
+
+        if self.num_latent_thoughts > 0:
+            self.thought_norm = RMSNorm(state_dim)
+            self.thought_ffn = SwiGLUFFN(state_dim, state_dim * 2)
 
         self.adapter = Adapter(state_dim, bottleneck=max(8, state_dim//4))
 
@@ -174,6 +195,13 @@ class VelmCore(nn.Module):
             norm_states = self.swa_norm(states)
             states = states + self.swa(norm_states)
 
+        # Latent thoughts (continuous unconstrained vectors)
+        if self.num_latent_thoughts > 0:
+            for _ in range(self.num_latent_thoughts):
+                norm_states = self.thought_norm(states)
+                thought = self.thought_ffn(norm_states)
+                states = states + thought
+
         # optionally apply adapter to all states (qTTT)
         if use_adapter:
             states = self.adapter(states)
@@ -184,12 +212,12 @@ class VelmFull(nn.Module):
 
     Flow: tokens -> CALM encoder (blocks) -> VelmCore -> decoder
     """
-    def __init__(self, vocab_size, block_size=4, embed_dim=64, latent_dim=64, state_dim=128):
+    def __init__(self, vocab_size, block_size=4, embed_dim=64, latent_dim=64, state_dim=128, num_latent_thoughts=0):
         super().__init__()
         self.vocab_size = vocab_size
         self.block_size = block_size
         self.encoder = CALMEncoder(vocab_size, block_size=block_size, embed_dim=embed_dim, latent_dim=latent_dim)
-        self.core = VelmCore(latent_dim=latent_dim, state_dim=state_dim)
+        self.core = VelmCore(latent_dim=latent_dim, state_dim=state_dim, num_latent_thoughts=num_latent_thoughts)
         self.decoder = CALMDecoder(latent_dim=state_dim, hidden=state_dim, vocab_size=vocab_size, block_size=block_size)
 
     def forward(self, history, use_adapter=False, return_cib_loss=False):
@@ -199,10 +227,18 @@ class VelmFull(nn.Module):
 
         # Adaptive K sequence chunking: allow sequences not divisible by block_size
         latents = []
-        for start_idx in range(0, L, K):
+        k_logits_list = [] if return_cib_loss else None
+
+        start_idx = 0
+        while start_idx < L:
             chunk = history[:, start_idx:start_idx+K]
-            lat = self.encoder(chunk)
+            if return_cib_loss:
+                lat, k_logits = self.encoder(chunk, return_k_logits=True)
+                k_logits_list.append(k_logits.unsqueeze(1))
+            else:
+                lat = self.encoder(chunk)
             latents.append(lat.unsqueeze(1))
+            start_idx += K
 
         latents = torch.cat(latents, dim=1)  # (B, n_blocks, latent)
 
@@ -213,7 +249,8 @@ class VelmFull(nn.Module):
             # Enforce that the latent norm is bounded (pruning cognitive bloat)
             # This is a structural penalty to compress continuous vectors
             cib_loss = latents.norm(p=2, dim=2).mean()
-            return states, latents, cib_loss
+            k_logits_tensor = torch.cat(k_logits_list, dim=1) if k_logits_list else None
+            return states, latents, cib_loss, k_logits_tensor
 
         return states, latents
 

@@ -273,7 +273,8 @@ def main():
         block_size=args.block_size,
         embed_dim=128,
         latent_dim=128,
-        state_dim=128,
+        state_dim=96, # Reduced from 128 to match Transformer parameter budget (699k vs 661k) and divisible by 32
+        num_latent_thoughts=1,
     )
     models["velm_lite"] = vl
     model_info["velm_lite"] = count_params(vl)
@@ -283,7 +284,7 @@ def main():
         block_size=args.block_size,
         embed_dim=128,
         latent_dim=128,
-        state_dim=96,
+        state_dim=88,
         num_miras_layers=2,
         num_swa_layers=1,
     )
@@ -381,7 +382,9 @@ def main():
             X, Y = X.to(device), Y.to(device)
 
             if name.startswith("velm"):
-                states, latents, cib_loss = model(X, return_cib_loss=True)
+                out = model(X, return_cib_loss=True)
+                states, latents, cib_loss = out[0], out[1], out[2]
+                k_logits = out[3] if len(out) > 3 else None
                 B, N, _ = states.shape
                 states_flat = states.view(B * N, -1)
                 # Ensure the decoder truncates block output appropriately for the exact sequence length
