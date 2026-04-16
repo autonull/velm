@@ -21,6 +21,28 @@ class SWALayer(nn.Module):
         self.v_proj = nn.Linear(dim, dim)
         self.o_proj = nn.Linear(dim, dim)
 
+        # RoPE parameters (fixed base)
+        self.register_buffer(
+            "inv_freq",
+            1.0 / (10000 ** (torch.arange(0, self.head_dim, 2).float() / self.head_dim)),
+            persistent=False
+        )
+
+    def apply_rope(self, x):
+        # x: (B, num_heads, N, head_dim)
+        B, n_h, N, d_h = x.shape
+        t = torch.arange(N, device=x.device, dtype=self.inv_freq.dtype)
+        freqs = torch.einsum("i,j->ij", t, self.inv_freq)
+        emb = torch.cat((freqs, freqs), dim=-1) # (N, d_h)
+        cos = emb.cos()[None, None, :, :]
+        sin = emb.sin()[None, None, :, :]
+
+        x_rot1 = x[..., : d_h // 2]
+        x_rot2 = x[..., d_h // 2 :]
+        x_rotated = torch.cat((-x_rot2, x_rot1), dim=-1)
+
+        return (x * cos) + (x_rotated * sin)
+
     def forward(self, x):
         # x: (B, N, D)
         B, N, D = x.shape
@@ -28,6 +50,10 @@ class SWALayer(nn.Module):
         q = self.q_proj(x).view(B, N, self.num_heads, self.head_dim).transpose(1, 2) # (B, num_heads, N, head_dim)
         k = self.k_proj(x).view(B, N, self.num_heads, self.head_dim).transpose(1, 2)
         v = self.v_proj(x).view(B, N, self.num_heads, self.head_dim).transpose(1, 2)
+
+        # Apply RoPE
+        q = self.apply_rope(q)
+        k = self.apply_rope(k)
 
         # Calculate scores
         scores = torch.matmul(q, k.transpose(-2, -1)) / (self.head_dim ** 0.5) # (B, num_heads, N, N)

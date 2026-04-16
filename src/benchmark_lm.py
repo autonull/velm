@@ -212,7 +212,9 @@ def main():
     velm_params = count_params(velm)
 
     # Instantiate Transformer with strictly matched parameter count
-    transformer = TransformerLM(vocab_size=vocab_size, d_model=128, nhead=4, nlayers=3, dim_feedforward=256, max_len=args.seq_len)
+    # Increased nlayers from 3 to 5 to ensure Transformer is strictly larger than VELM for fair comparison
+    # (VELM SwiGLU added params, so we need 5 layers of TF to beat 709k)
+    transformer = TransformerLM(vocab_size=vocab_size, d_model=128, nhead=4, nlayers=5, dim_feedforward=256, max_len=args.seq_len)
     tf_params = count_params(transformer)
 
     print(f"VELM params: {velm_params}")
@@ -301,11 +303,50 @@ def main():
         if peak_memory > 0:
             print(f"{name.upper()} Peak Memory: {peak_memory:.2f} MB")
 
+    # Export History to CSV
+    import csv
+    history_path = os.path.join(args.out, 'history.csv')
+    steps = np.arange(len(results['transformer']['train_loss'])) * args.eval_interval
+
+    with open(history_path, 'w', newline='') as csvfile:
+        fieldnames = ['step', 'tf_train_loss', 'tf_val_loss', 'tf_val_acc', 'tf_val_latency', 'tf_throughput',
+                      'velm_train_loss', 'velm_val_loss', 'velm_val_acc', 'velm_val_latency', 'velm_throughput', 'velm_cib_norm']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for i, step in enumerate(steps):
+            row = {'step': step}
+            row['tf_train_loss'] = results['transformer']['train_loss'][i]
+            row['tf_val_loss'] = results['transformer']['val_loss'][i]
+            row['tf_val_acc'] = results['transformer']['val_acc'][i]
+            row['tf_val_latency'] = results['transformer']['val_latency'][i]
+            # Handle throughput indexing (first step is missing in array)
+            if i > 0 and (i-1) < len(results['transformer']['throughput']):
+                row['tf_throughput'] = results['transformer']['throughput'][i-1]
+            else:
+                row['tf_throughput'] = 0.0
+
+            row['velm_train_loss'] = results['velm']['train_loss'][i]
+            row['velm_val_loss'] = results['velm']['val_loss'][i]
+            row['velm_val_acc'] = results['velm']['val_acc'][i]
+            row['velm_val_latency'] = results['velm']['val_latency'][i]
+            if len(results['velm']['cib_norm']) > i:
+                 row['velm_cib_norm'] = results['velm']['cib_norm'][i]
+            else:
+                 row['velm_cib_norm'] = 0.0
+
+            if i > 0 and (i-1) < len(results['velm']['throughput']):
+                row['velm_throughput'] = results['velm']['throughput'][i-1]
+            else:
+                row['velm_throughput'] = 0.0
+
+            writer.writerow(row)
+    print(f"History data saved to {history_path}")
+
     # Plotting: Composite Chart
     fig, axs = plt.subplots(3, 2, figsize=(15, 12))
     fig.suptitle('VELM vs Vanilla Transformer Benchmarking', fontsize=16)
 
-    steps = np.arange(len(results['transformer']['train_loss'])) * args.eval_interval
 
     # Plot 1: Train Loss
     for name in models:
