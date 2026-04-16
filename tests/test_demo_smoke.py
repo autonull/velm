@@ -7,7 +7,7 @@ def test_train_velm_smoke():
     if os.path.exists(out):
         # ensure clean
         pass
-    cmd = ['python3', 'src/train_velm_full.py', '--steps', '1', '--out', out, '--device', 'cpu']
+    cmd = ['python3', 'experiments/train_velm_full.py', '--steps', '1', '--out', out, '--device', 'cpu']
     res = subprocess.run(cmd, check=True)
     # smoke artifact
     assert os.path.exists(os.path.join(out, 'smoke.txt'))
